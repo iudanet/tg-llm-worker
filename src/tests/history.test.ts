@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatMessage } from '../llm/provider';
-import { trimHistory } from '../storage/history';
+import { conversationKey, trimHistory } from '../storage/history';
 
 function history(count: number): ChatMessage[] {
     const messages: ChatMessage[] = [];
@@ -33,5 +33,21 @@ describe('trimHistory', () => {
     it('returns everything when the budget is disabled', () => {
         const messages = history(6);
         expect(trimHistory(messages, 0)).toEqual(messages);
+    });
+});
+
+describe('conversationKey', () => {
+    it('uses a chat-scoped key when there is no topic', () => {
+        expect(conversationKey({ chatId: 42 })).toBe('chat:42');
+    });
+
+    it('keeps each topic in its own key', () => {
+        expect(conversationKey({ chatId: 42, threadId: 7 })).toBe('chat:42:7');
+    });
+
+    it('does not collide between a chat and its topics', () => {
+        const plain = conversationKey({ chatId: 42 });
+        const topic = conversationKey({ chatId: 42, threadId: 1 });
+        expect(plain).not.toBe(topic);
     });
 });

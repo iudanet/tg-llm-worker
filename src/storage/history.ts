@@ -3,10 +3,31 @@ import type { ChatMessage } from '../llm/provider';
 /**
  * HistoryStore persists per-chat conversation context in Workers KV.
  */
+/**
+ * ConversationKey identifies one conversation thread.
+ *
+ * Топики в приватных чатах (Bot API 9.3+) существуют ровно для того, чтобы
+ * разговоры не смешивались, поэтому история хранится отдельно для каждого
+ * треда, а не одна на весь чат.
+ */
+export interface ConversationKey {
+    chatId: number;
+    threadId?: number;
+}
+
 export interface HistoryStore {
-    load: (chatId: number) => Promise<ChatMessage[]>;
-    save: (chatId: number, messages: ChatMessage[]) => Promise<void>;
-    clear: (chatId: number) => Promise<void>;
+    load: (key: ConversationKey) => Promise<ChatMessage[]>;
+    save: (key: ConversationKey, messages: ChatMessage[]) => Promise<void>;
+    clear: (key: ConversationKey) => Promise<void>;
+}
+
+/**
+ * conversationKey builds the KV key for a chat or one of its topics.
+ */
+export function conversationKey(key: ConversationKey): string {
+    return key.threadId === undefined
+        ? `chat:${key.chatId}`
+        : `chat:${key.chatId}:${key.threadId}`;
 }
 
 interface StoredHistory {
@@ -25,28 +46,24 @@ export class KVHistoryStore implements HistoryStore {
         this.ttlSeconds = ttlSeconds;
     }
 
-    private key(chatId: number): string {
-        return `chat:${chatId}`;
-    }
-
-    async load(chatId: number): Promise<ChatMessage[]> {
-        const raw = await this.kv.get(this.key(chatId), 'json') as StoredHistory | null;
+    async load(key: ConversationKey): Promise<ChatMessage[]> {
+        const raw = await this.kv.get(conversationKey(key), 'json') as StoredHistory | null;
         if (!raw || !Array.isArray(raw.messages)) {
             return [];
         }
         return raw.messages;
     }
 
-    async save(chatId: number, messages: ChatMessage[]): Promise<void> {
+    async save(key: ConversationKey, messages: ChatMessage[]): Promise<void> {
         const trimmed = trimHistory(messages, this.maxMessages);
         const payload: StoredHistory = { messages: trimmed, updated_at: Date.now() };
-        await this.kv.put(this.key(chatId), JSON.stringify(payload), {
+        await this.kv.put(conversationKey(key), JSON.stringify(payload), {
             expirationTtl: this.ttlSeconds,
         });
     }
 
-    async clear(chatId: number): Promise<void> {
-        await this.kv.delete(this.key(chatId));
+    async clear(key: ConversationKey): Promise<void> {
+        await this.kv.delete(conversationKey(key));
     }
 }
 

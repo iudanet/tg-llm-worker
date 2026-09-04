@@ -42,6 +42,9 @@ function renderPage(title: string, body: string): Response {
  */
 export function indexPage(request: Request, config: Config): Response {
     const origin = new URL(request.url).origin;
+    const keyNote = config.apiKey
+        ? ''
+        : '<p class="err">OPENAI_API_KEY не задан: <code>npx wrangler secret put OPENAI_API_KEY</code></p>';
     const secretNote = config.webhookSecret
         ? '<p class="ok">Secret token настроен — webhook будет привязан с проверкой подписи.</p>'
         : '<p class="err">TELEGRAM_WEBHOOK_SECRET не задан. Любой, кто знает адрес воркера, сможет слать боту апдейты.</p>';
@@ -53,6 +56,7 @@ export function indexPage(request: Request, config: Config): Response {
 <p>Чтобы Telegram начал слать сообщения этому воркеру, нужно привязать webhook:</p>
 <p><a class="button" href="./init">Привязать webhook</a></p>
 ${secretNote}
+${keyNote}
 <h2>Текущая конфигурация</h2>
 <pre>модель:            ${config.model}
 API base:          ${config.apiBase}

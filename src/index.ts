@@ -57,6 +57,11 @@ async function handleWebhook(
         return new Response('Bad request', { status: 400 });
     }
 
+    if (!config.apiKey) {
+        console.error(JSON.stringify({ msg: 'OPENAI_API_KEY is not configured' }));
+        return new Response('OK', { status: 200 });
+    }
+
     const deps = {
         api,
         provider: new OpenAIProvider({

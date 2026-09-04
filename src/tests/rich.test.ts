@@ -2,59 +2,66 @@ import { describe, expect, it } from 'vitest';
 import { markdownToRichBlocks, parseInline } from '../telegram/rich';
 
 describe('parseInline', () => {
-    it('keeps plain text as a single run', () => {
-        expect(parseInline('hello world')).toEqual([{ type: 'plain', text: 'hello world' }]);
+    it('returns a bare string for plain text', () => {
+        expect(parseInline('hello world')).toBe('hello world');
     });
 
     it('extracts inline code', () => {
         expect(parseInline('run `npm test` now')).toEqual([
-            { type: 'plain', text: 'run ' },
+            'run ',
             { type: 'code', text: 'npm test' },
-            { type: 'plain', text: ' now' },
+            ' now',
         ]);
     });
 
     it('extracts bold and italic', () => {
         expect(parseInline('**bold** and *italic*')).toEqual([
             { type: 'bold', text: 'bold' },
-            { type: 'plain', text: ' and ' },
+            ' and ',
             { type: 'italic', text: 'italic' },
         ]);
     });
 
+    it('does not wrap a single run in an array', () => {
+        expect(parseInline('**only**')).toEqual({ type: 'bold', text: 'only' });
+    });
+
     it('does not treat snake_case or a*b as formatting', () => {
-        expect(parseInline('a*b and c*d')).toEqual([{ type: 'plain', text: 'a*b and c*d' }]);
+        expect(parseInline('a*b and c*d')).toBe('a*b and c*d');
     });
 });
 
 describe('markdownToRichBlocks', () => {
+    it('clamps deep headings to the three sizes Telegram supports', () => {
+        const blocks = markdownToRichBlocks('##### Deep');
+        expect(blocks[0]).toEqual({ type: 'heading', size: 3, text: 'Deep' });
+    });
+
     it('converts a heading', () => {
         expect(markdownToRichBlocks('## Title')).toEqual([
-            { type: 'section_heading', text: [{ type: 'plain', text: 'Title' }] },
+            { type: 'heading', size: 2, text: 'Title' },
         ]);
     });
 
     it('converts a fenced code block with language', () => {
         const blocks = markdownToRichBlocks('```go\nfmt.Println()\n```');
         expect(blocks).toEqual([
-            {
-                type: 'preformatted',
-                text: [{ type: 'plain', text: 'fmt.Println()' }],
-                language: 'go',
-            },
+            { type: 'pre', text: 'fmt.Println()', language: 'go' },
         ]);
     });
 
     it('handles an unterminated code fence', () => {
         const blocks = markdownToRichBlocks('```\nabc');
         expect(blocks).toHaveLength(1);
-        expect(blocks[0]!.type).toBe('preformatted');
+        expect(blocks[0]!.type).toBe('pre');
     });
 
     it('converts unordered and ordered lists', () => {
         const unordered = markdownToRichBlocks('- one\n- two');
         expect(unordered[0]).toMatchObject({ type: 'list', is_ordered: false });
         expect((unordered[0] as any).items).toHaveLength(2);
+        // Пункт списка содержит вложенные блоки, а не текст напрямую.
+        expect((unordered[0] as any).items[0].blocks[0].type).toBe('paragraph');
 
         const ordered = markdownToRichBlocks('1. one\n2. two');
         expect(ordered[0]).toMatchObject({ type: 'list', is_ordered: true });
@@ -62,7 +69,7 @@ describe('markdownToRichBlocks', () => {
 
     it('converts a block quotation', () => {
         expect(markdownToRichBlocks('> quoted')).toEqual([
-            { type: 'block_quotation', text: [{ type: 'plain', text: 'quoted' }] },
+            { type: 'blockquote', blocks: [{ type: 'paragraph', text: 'quoted' }] },
         ]);
     });
 
@@ -71,7 +78,7 @@ describe('markdownToRichBlocks', () => {
         expect(blocks).toHaveLength(2);
         expect(blocks[0]).toEqual({
             type: 'paragraph',
-            text: [{ type: 'plain', text: 'line one\nline two' }],
+            text: 'line one\nline two',
         });
     });
 
@@ -79,15 +86,20 @@ describe('markdownToRichBlocks', () => {
         const md = '# H\n\ntext with `code`\n\n- a\n- b\n\n```js\nx\n```\n\n> q';
         const blocks = markdownToRichBlocks(md);
         expect(blocks.map(b => b.type)).toEqual([
-            'section_heading',
+            'heading',
             'paragraph',
             'list',
-            'preformatted',
-            'block_quotation',
+            'pre',
+            'blockquote',
         ]);
     });
 
     it('returns no blocks for empty input', () => {
         expect(markdownToRichBlocks('')).toEqual([]);
+    });
+
+    it('never emits an object with a plain type (rejected by the API)', () => {
+        const md = '# H\n\ntext `code` **bold**\n\n- item\n\n> quote';
+        expect(JSON.stringify(markdownToRichBlocks(md))).not.toContain('"plain"');
     });
 });

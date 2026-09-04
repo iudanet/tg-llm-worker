@@ -6,46 +6,39 @@
  * блоков, которое реально порождает ответ LLM.
  */
 
-export interface RichTextPlain {
-    type: 'plain';
-    text: string;
+export interface RichTextStyled {
+    type: 'bold' | 'italic' | 'code';
+    text: RichText;
 }
 
-export interface RichTextCode {
-    type: 'code';
-    text: string;
-}
-
-export interface RichTextBold {
-    type: 'bold';
-    text: string;
-}
-
-export interface RichTextItalic {
-    type: 'italic';
-    text: string;
-}
-
-export type RichText = RichTextPlain | RichTextCode | RichTextBold | RichTextItalic;
+/**
+ * RichText is either a plain string, a styled run, or a sequence of those.
+ * Простой текст передаётся именно строкой: варианта type: 'plain' в API нет,
+ * и объект с ним отвергается как "Unsupported rich text type".
+ */
+export type RichText = string | RichTextStyled | RichText[];
 
 export interface InputRichBlockParagraph {
     type: 'paragraph';
-    text: RichText[];
+    text: RichText;
 }
 
-export interface InputRichBlockSectionHeading {
-    type: 'section_heading';
-    text: RichText[];
+/** Заголовок: size 1-3, где 1 — самый крупный. */
+export interface InputRichBlockHeading {
+    type: 'heading';
+    size: 1 | 2 | 3;
+    text: RichText;
 }
 
-export interface InputRichBlockPreformatted {
-    type: 'preformatted';
-    text: RichText[];
+export interface InputRichBlockPre {
+    type: 'pre';
+    text: RichText;
     language?: string;
 }
 
+/** Пункт списка и цитата содержат вложенные блоки, а не текст. */
 export interface InputRichBlockListItem {
-    text: RichText[];
+    blocks: InputRichBlock[];
 }
 
 export interface InputRichBlockList {
@@ -54,17 +47,17 @@ export interface InputRichBlockList {
     is_ordered?: boolean;
 }
 
-export interface InputRichBlockBlockQuotation {
-    type: 'block_quotation';
-    text: RichText[];
+export interface InputRichBlockBlockquote {
+    type: 'blockquote';
+    blocks: InputRichBlock[];
 }
 
 export type InputRichBlock =
     | InputRichBlockParagraph
-    | InputRichBlockSectionHeading
-    | InputRichBlockPreformatted
+    | InputRichBlockHeading
+    | InputRichBlockPre
     | InputRichBlockList
-    | InputRichBlockBlockQuotation;
+    | InputRichBlockBlockquote;
 
 export interface InputRichMessage {
     blocks: InputRichBlock[];
@@ -106,8 +99,8 @@ export function markdownToRichBlocks(markdown: string): InputRichBlock[] {
             // Закрывающий фенс может отсутствовать, если ответ оборвался.
             index += 1;
             blocks.push({
-                type: 'preformatted',
-                text: [{ type: 'plain', text: body.join('\n') }],
+                type: 'pre',
+                text: body.join('\n'),
                 ...(language ? { language } : {}),
             });
             continue;
@@ -115,8 +108,11 @@ export function markdownToRichBlocks(markdown: string): InputRichBlock[] {
 
         const heading = HEADING_RE.exec(line);
         if (heading) {
+            // Markdown знает 6 уровней, Telegram — три.
+            const level = Math.min((heading[1] ?? '#').length, 3) as 1 | 2 | 3;
             blocks.push({
-                type: 'section_heading',
+                type: 'heading',
+                size: level,
                 text: parseInline(heading[2] ?? ''),
             });
             index += 1;
@@ -130,8 +126,8 @@ export function markdownToRichBlocks(markdown: string): InputRichBlock[] {
                 index += 1;
             }
             blocks.push({
-                type: 'block_quotation',
-                text: parseInline(body.join('\n')),
+                type: 'blockquote',
+                blocks: [{ type: 'paragraph', text: parseInline(body.join('\n')) }],
             });
             continue;
         }
@@ -145,7 +141,7 @@ export function markdownToRichBlocks(markdown: string): InputRichBlock[] {
                 if (!match) {
                     break;
                 }
-                items.push({ text: parseInline(match[1] ?? '') });
+                items.push({ blocks: [{ type: 'paragraph', text: parseInline(match[1] ?? '') }] });
                 index += 1;
             }
             blocks.push({ type: 'list', items, is_ordered: isOrdered });
@@ -179,32 +175,36 @@ const INLINE_RE = /(`[^`]+`|\*\*[^*]+\*\*|(?<![*\w])\*[^*]+\*(?!\w))/g;
 /**
  * parseInline splits a line into styled rich-text runs.
  */
-export function parseInline(text: string): RichText[] {
+export function parseInline(text: string): RichText {
     if (text === '') {
-        return [{ type: 'plain', text: '' }];
+        return '';
     }
 
-    const result: RichText[] = [];
+    const runs: RichText[] = [];
     let lastIndex = 0;
 
     for (const match of text.matchAll(INLINE_RE)) {
         const token = match[0];
         const start = match.index ?? 0;
         if (start > lastIndex) {
-            result.push({ type: 'plain', text: text.slice(lastIndex, start) });
+            runs.push(text.slice(lastIndex, start));
         }
         if (token.startsWith('`')) {
-            result.push({ type: 'code', text: token.slice(1, -1) });
+            runs.push({ type: 'code', text: token.slice(1, -1) });
         } else if (token.startsWith('**')) {
-            result.push({ type: 'bold', text: token.slice(2, -2) });
+            runs.push({ type: 'bold', text: token.slice(2, -2) });
         } else {
-            result.push({ type: 'italic', text: token.slice(1, -1) });
+            runs.push({ type: 'italic', text: token.slice(1, -1) });
         }
         lastIndex = start + token.length;
     }
 
     if (lastIndex < text.length) {
-        result.push({ type: 'plain', text: text.slice(lastIndex) });
+        runs.push(text.slice(lastIndex));
     }
-    return result.length > 0 ? result : [{ type: 'plain', text }];
+    if (runs.length === 0) {
+        return text;
+    }
+    // Одиночный фрагмент не нужно оборачивать в массив.
+    return runs.length === 1 ? runs[0]! : runs;
 }

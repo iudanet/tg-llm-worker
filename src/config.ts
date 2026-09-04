@@ -73,17 +73,21 @@ export function parseWhiteList(raw: string | undefined): Set<number> {
     return result;
 }
 
+/**
+ * loadConfig reads the runtime configuration from the worker environment.
+ *
+ * Отсутствие ключа модели здесь не является ошибкой: страница с инструкцией
+ * должна открываться и на недонастроенном воркере, чтобы было видно, чего
+ * не хватает. Наличие ключа проверяется там, где он реально нужен.
+ */
 export function loadConfig(env: Env): Config {
     if (!env.TELEGRAM_BOT_TOKEN) {
         throw new Error('TELEGRAM_BOT_TOKEN is not configured');
     }
-    if (!env.OPENAI_API_KEY) {
-        throw new Error('OPENAI_API_KEY is not configured');
-    }
     return {
         botToken: env.TELEGRAM_BOT_TOKEN,
         webhookSecret: env.TELEGRAM_WEBHOOK_SECRET || null,
-        apiKey: env.OPENAI_API_KEY,
+        apiKey: env.OPENAI_API_KEY ?? '',
         apiBase: (env.OPENAI_API_BASE || DEFAULT_API_BASE).replace(/\/+$/, ''),
         model: env.CHAT_MODEL || DEFAULT_MODEL,
         systemPrompt: env.SYSTEM_PROMPT || null,

@@ -1,6 +1,6 @@
 import type { Config } from './config';
 import type { ChatMessage, ChatProvider } from './llm/provider';
-import type { HistoryStore } from './storage/history';
+import type { ConversationKey, HistoryStore } from './storage/history';
 import type { TelegramApi } from './telegram/api';
 import type { TelegramMessage, TelegramUpdate } from './telegram/types';
 import { deliverAnswer } from './telegram/deliver';
@@ -58,11 +58,12 @@ export function isAllowed(message: TelegramMessage, config: Config): boolean {
 async function handleCommand(text: string, message: TelegramMessage, deps: HandlerDeps): Promise<void> {
     const command = text.split(/\s+/)[0]?.split('@')[0];
     const chatId = message.chat.id;
+    const key: ConversationKey = { chatId, threadId: message.message_thread_id };
 
     switch (command) {
         case '/new':
         case '/start':
-            await deps.history.clear(chatId);
+            await deps.history.clear(key);
             await deps.api.sendMessage({
                 chat_id: chatId,
                 message_thread_id: message.message_thread_id,
@@ -87,7 +88,8 @@ async function handleCommand(text: string, message: TelegramMessage, deps: Handl
 
 async function handleChat(text: string, message: TelegramMessage, deps: HandlerDeps): Promise<void> {
     const chatId = message.chat.id;
-    const history = await deps.history.load(chatId);
+    const key: ConversationKey = { chatId, threadId: message.message_thread_id };
+    const history = await deps.history.load(key);
 
     const conversation: ChatMessage[] = [];
     if (deps.config.systemPrompt) {
@@ -128,7 +130,7 @@ async function handleChat(text: string, message: TelegramMessage, deps: HandlerD
         useRichMessages: deps.config.useRichMessages,
     });
 
-    await deps.history.save(chatId, [
+    await deps.history.save(key, [
         ...history,
         { role: 'user', content: text },
         { role: 'assistant', content: answer },
