@@ -6,10 +6,19 @@ import type { TelegramMessage, TelegramUpdate } from './telegram/types';
 import { deliverAnswer } from './telegram/deliver';
 import { DraftStreamer } from './telegram/stream';
 
+/** BOT_COMMANDS публикуется в меню Telegram при инициализации воркера. */
+export const BOT_COMMANDS = [
+    { command: 'new', description: 'Очистить контекст и начать заново' },
+    { command: 'help', description: 'Справка по боту' },
+];
+
 const HELP_TEXT = [
     'Команды:',
     '/new — начать новый диалог (очистить контекст)',
     '/help — эта справка',
+    '',
+    'История хранится отдельно для каждого топика, поэтому /new очищает',
+    'только текущий разговор.',
 ].join('\n');
 
 export interface HandlerDeps {

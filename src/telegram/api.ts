@@ -67,6 +67,13 @@ export class TelegramApi {
         return this.call<boolean>('sendRichMessageDraft', params);
     }
 
+    /**
+     * setMyCommands publishes the command menu shown in the Telegram UI.
+     */
+    setMyCommands(commands: Array<{ command: string; description: string }>): Promise<ApiResponse<boolean>> {
+        return this.call<boolean>('setMyCommands', { commands });
+    }
+
     setWebhook(params: {
         url: string;
         secret_token?: string;

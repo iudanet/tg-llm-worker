@@ -1,5 +1,6 @@
 import type { Config } from './config';
 import type { TelegramApi } from './telegram/api';
+import { BOT_COMMANDS } from './handler';
 
 /**
  * renderPage wraps content into a minimal self-contained HTML document.
@@ -87,6 +88,13 @@ export async function initWebhook(request: Request, api: TelegramApi, config: Co
         allowed_updates: ['message'],
     });
 
+    // Меню команд живёт на стороне Telegram и переживает смену воркера,
+    // поэтому перезаписываем его вместе с привязкой webhook.
+    const commands = await api.setMyCommands(BOT_COMMANDS);
+    const commandsStatus = commands.ok
+        ? `<p class="ok">Меню команд обновлено: ${BOT_COMMANDS.map(c => `/${c.command}`).join(', ')}</p>`
+        : `<p class="err">Не удалось обновить меню команд: ${commands.description ?? 'неизвестная ошибка'}</p>`;
+
     const status = result.ok
         ? `<p class="ok">Webhook привязан к <code>${webhookUrl}</code></p>`
         : `<p class="err">Не удалось привязать webhook: ${result.description ?? 'неизвестная ошибка'}</p>`;
@@ -94,6 +102,7 @@ export async function initWebhook(request: Request, api: TelegramApi, config: Co
     return renderPage('tg-llm-worker — init', `
 <h1>Привязка webhook</h1>
 ${status}
+${commandsStatus}
 <pre>${JSON.stringify(result, null, 2)}</pre>
 <p><a href="./">← назад</a></p>
 `);
