@@ -3,3 +3,7 @@ node_modules/
 dist/
 .dev.vars
 *.log
+
+# скриншоты и присланные картинки
+photo_*.jpg
+*.png

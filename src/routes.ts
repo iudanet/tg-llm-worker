@@ -55,7 +55,7 @@ export function indexPage(request: Request, config: Config): Response {
 <p>Воркер запущен на <code>${origin}</code>.</p>
 <h2>Подключение</h2>
 <p>Чтобы Telegram начал слать сообщения этому воркеру, нужно привязать webhook:</p>
-<p><a class="button" href="./init">Привязать webhook</a></p>
+<p><a class="button" href="./init?token=${encodeURIComponent(config.webhookSecret ?? '')}">Привязать webhook</a></p>
 ${secretNote}
 ${keyNote}
 <h2>Текущая конфигурация</h2>
@@ -104,6 +104,6 @@ export async function initWebhook(request: Request, api: TelegramApi, config: Co
 ${status}
 ${commandsStatus}
 <pre>${JSON.stringify(result, null, 2)}</pre>
-<p><a href="./">← назад</a></p>
+<p><a href="./?token=${encodeURIComponent(config.webhookSecret ?? '')}">← назад</a></p>
 `);
 }

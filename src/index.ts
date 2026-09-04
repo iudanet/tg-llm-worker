@@ -21,11 +21,15 @@ export default {
         const url = new URL(request.url);
         const api = new TelegramApi(config.botToken);
 
-        if (request.method === 'GET' && url.pathname === '/') {
-            return indexPage(request, config);
-        }
-        if (request.method === 'GET' && url.pathname === '/init') {
-            return initWebhook(request, api, config);
+        // Служебные страницы раскрывают конфигурацию и меняют привязку webhook,
+        // поэтому доступны только по тому же секрету, что защищает вебхук.
+        if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/init')) {
+            if (!isAuthorized(url, config)) {
+                return new Response('Not found', { status: 404 });
+            }
+            return url.pathname === '/'
+                ? indexPage(request, config)
+                : initWebhook(request, api, config);
         }
         if (request.method === 'POST' && url.pathname === '/webhook') {
             return handleWebhook(request, env, ctx, api, config);
@@ -33,6 +37,19 @@ export default {
         return new Response('Not found', { status: 404 });
     },
 };
+
+/**
+ * isAuthorized guards the service pages with the webhook secret.
+ * Секрет передаётся в query-параметре: страницы открываются из браузера,
+ * где заголовок не проставить.
+ */
+function isAuthorized(url: URL, config: ReturnType<typeof loadConfig>): boolean {
+    if (!config.webhookSecret) {
+        // Без секрета защищать нечем — не открываем служебные страницы вовсе.
+        return false;
+    }
+    return url.searchParams.get('token') === config.webhookSecret;
+}
 
 async function handleWebhook(
     request: Request,
