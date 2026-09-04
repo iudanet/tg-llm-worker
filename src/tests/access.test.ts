@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Config } from '../config';
 import type { TelegramMessage } from '../telegram/types';
 import { parseWhiteList } from '../config';
-import { isAllowed } from '../handler';
+import { describeUnsupported, isAllowed } from '../handler';
 import { buildPreview } from '../telegram/deliver';
 
 function configWith(ids: string | undefined): Config {
@@ -63,5 +63,41 @@ describe('buildPreview', () => {
         const preview = buildPreview('a'.repeat(2000), 100);
         expect(preview.length).toBeLessThan(200);
         expect(preview).toContain('вложении');
+    });
+});
+
+describe('describeUnsupported', () => {
+    const base: TelegramMessage = {
+        message_id: 1,
+        from: { id: 1, is_bot: false, first_name: 'U' },
+        chat: { id: 1, type: 'private' },
+        date: 0,
+    };
+
+    it('returns null for a plain text message', () => {
+        expect(describeUnsupported({ ...base, text: 'привет' })).toBeNull();
+    });
+
+    it('explains that photos are not supported yet', () => {
+        const message = {
+            ...base,
+            photo: [{ file_id: 'f', file_unique_id: 'u', width: 1, height: 1 }],
+        };
+        expect(describeUnsupported(message)).toContain('картинки');
+    });
+
+    it('answers a photo sent with a caption instead of staying silent', () => {
+        const message = {
+            ...base,
+            caption: 'что тут?',
+            photo: [{ file_id: 'f', file_unique_id: 'u', width: 1, height: 1 }],
+        };
+        expect(describeUnsupported(message)).not.toBeNull();
+    });
+
+    it('covers documents, voice and stickers', () => {
+        expect(describeUnsupported({ ...base, document: { file_id: 'f' } })).toContain('файлы');
+        expect(describeUnsupported({ ...base, voice: { file_id: 'f' } })).toContain('голос');
+        expect(describeUnsupported({ ...base, sticker: { file_id: 'f' } })).toContain('стикер');
     });
 });

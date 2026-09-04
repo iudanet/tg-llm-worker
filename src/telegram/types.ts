@@ -16,6 +16,14 @@ export interface TelegramChat {
     username?: string;
 }
 
+export interface TelegramPhotoSize {
+    file_id: string;
+    file_unique_id: string;
+    width: number;
+    height: number;
+    file_size?: number;
+}
+
 export interface TelegramMessage {
     message_id: number;
     message_thread_id?: number;
@@ -24,7 +32,14 @@ export interface TelegramMessage {
     chat: TelegramChat;
     date: number;
     text?: string;
+    caption?: string;
     entities?: unknown[];
+    photo?: TelegramPhotoSize[];
+    document?: { file_id: string; file_name?: string; mime_type?: string };
+    voice?: { file_id: string };
+    audio?: { file_id: string };
+    video?: { file_id: string };
+    sticker?: { file_id: string };
 }
 
 export interface TelegramUpdate {

@@ -33,7 +33,7 @@ export interface HandlerDeps {
  */
 export async function handleUpdate(update: TelegramUpdate, deps: HandlerDeps): Promise<void> {
     const message = update.message;
-    if (!message?.text || !message.from) {
+    if (!message?.from) {
         return;
     }
     if (!isAllowed(message, deps.config)) {
@@ -45,12 +45,50 @@ export async function handleUpdate(update: TelegramUpdate, deps: HandlerDeps): P
         return;
     }
 
-    const text = message.text.trim();
+    // Вложения пока не поддерживаются: молчание в ответ на фото выглядит
+    // как поломка, поэтому явно говорим, чего бот не умеет.
+    const unsupported = describeUnsupported(message);
+    if (unsupported) {
+        await deps.api.sendMessage({
+            chat_id: message.chat.id,
+            message_thread_id: message.message_thread_id,
+            text: unsupported,
+        });
+        return;
+    }
+
+    const text = message.text?.trim();
+    if (!text) {
+        return;
+    }
     if (text.startsWith('/')) {
         await handleCommand(text, message, deps);
         return;
     }
     await handleChat(text, message, deps);
+}
+
+/**
+ * describeUnsupported names the attachment kind the bot cannot handle yet.
+ * Возвращает null, если сообщение обычное текстовое.
+ */
+export function describeUnsupported(message: TelegramMessage): string | null {
+    if (message.photo?.length) {
+        return 'Пока не умею читать картинки — распознавание изображений ещё не подключено. Опишите вопрос текстом.';
+    }
+    if (message.document) {
+        return 'Пока не умею читать файлы. Пришлите содержимое текстом.';
+    }
+    if (message.voice || message.audio) {
+        return 'Пока не умею распознавать голос и аудио. Напишите текстом.';
+    }
+    if (message.video) {
+        return 'Пока не умею смотреть видео.';
+    }
+    if (message.sticker) {
+        return 'На стикеры отвечать не умею — напишите текстом.';
+    }
+    return null;
 }
 
 /**
