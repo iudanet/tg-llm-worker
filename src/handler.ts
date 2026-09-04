@@ -1,0 +1,136 @@
+import type { Config } from './config';
+import type { ChatMessage, ChatProvider } from './llm/provider';
+import type { HistoryStore } from './storage/history';
+import type { TelegramApi } from './telegram/api';
+import type { TelegramMessage, TelegramUpdate } from './telegram/types';
+import { deliverAnswer } from './telegram/deliver';
+import { DraftStreamer } from './telegram/stream';
+
+const HELP_TEXT = [
+    'Команды:',
+    '/new — начать новый диалог (очистить контекст)',
+    '/help — эта справка',
+].join('\n');
+
+export interface HandlerDeps {
+    api: TelegramApi;
+    provider: ChatProvider;
+    history: HistoryStore;
+    config: Config;
+}
+
+/**
+ * handleUpdate processes a single Telegram webhook update.
+ */
+export async function handleUpdate(update: TelegramUpdate, deps: HandlerDeps): Promise<void> {
+    const message = update.message;
+    if (!message?.text || !message.from) {
+        return;
+    }
+    if (!isAllowed(message, deps.config)) {
+        console.error(JSON.stringify({
+            msg: 'rejected by whitelist',
+            user_id: message.from.id,
+            chat_id: message.chat.id,
+        }));
+        return;
+    }
+
+    const text = message.text.trim();
+    if (text.startsWith('/')) {
+        await handleCommand(text, message, deps);
+        return;
+    }
+    await handleChat(text, message, deps);
+}
+
+/**
+ * isAllowed checks the sender against the configured whitelist.
+ */
+export function isAllowed(message: TelegramMessage, config: Config): boolean {
+    if (config.whiteList.size === 0) {
+        return false;
+    }
+    const userId = message.from?.id;
+    return userId !== undefined && config.whiteList.has(userId);
+}
+
+async function handleCommand(text: string, message: TelegramMessage, deps: HandlerDeps): Promise<void> {
+    const command = text.split(/\s+/)[0]?.split('@')[0];
+    const chatId = message.chat.id;
+
+    switch (command) {
+        case '/new':
+        case '/start':
+            await deps.history.clear(chatId);
+            await deps.api.sendMessage({
+                chat_id: chatId,
+                message_thread_id: message.message_thread_id,
+                text: 'Контекст очищен. Начинаем новый диалог.',
+            });
+            return;
+        case '/help':
+            await deps.api.sendMessage({
+                chat_id: chatId,
+                message_thread_id: message.message_thread_id,
+                text: HELP_TEXT,
+            });
+            return;
+        default:
+            await deps.api.sendMessage({
+                chat_id: chatId,
+                message_thread_id: message.message_thread_id,
+                text: `Неизвестная команда. ${HELP_TEXT}`,
+            });
+    }
+}
+
+async function handleChat(text: string, message: TelegramMessage, deps: HandlerDeps): Promise<void> {
+    const chatId = message.chat.id;
+    const history = await deps.history.load(chatId);
+
+    const conversation: ChatMessage[] = [];
+    if (deps.config.systemPrompt) {
+        conversation.push({ role: 'system', content: deps.config.systemPrompt });
+    }
+    conversation.push(...history, { role: 'user', content: text });
+
+    const streamer = new DraftStreamer(deps.api, {
+        chatId,
+        threadId: message.message_thread_id,
+        intervalMs: deps.config.streamIntervalMs,
+    });
+    await streamer.start();
+
+    let answer: string;
+    try {
+        answer = await deps.provider.stream(conversation, {
+            onDelta: accumulated => streamer.update(accumulated),
+        });
+    } catch (error) {
+        console.error(JSON.stringify({
+            msg: 'llm request failed',
+            chat_id: chatId,
+            error: error instanceof Error ? error.message : String(error),
+        }));
+        await deps.api.sendMessage({
+            chat_id: chatId,
+            message_thread_id: message.message_thread_id,
+            text: 'Не удалось получить ответ от модели. Попробуйте ещё раз.',
+        });
+        return;
+    }
+
+    await deliverAnswer(deps.api, answer, {
+        chatId,
+        threadId: message.message_thread_id,
+        documentThreshold: deps.config.documentThreshold,
+        useRichMessages: deps.config.useRichMessages,
+    });
+
+    await deps.history.save(chatId, [
+        ...history,
+        { role: 'user', content: text },
+        { role: 'assistant', content: answer },
+    ]);
+}
