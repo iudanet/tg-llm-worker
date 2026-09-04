@@ -20,13 +20,32 @@ Telegram-бот с LLM на Cloudflare Workers. Стриминг ответа ч
 npm install
 ```
 
+Wrangler ставится локально, глобальной команды `wrangler` нет — вызывать
+через `npx wrangler ...` либо через скрипты `npm run deploy` / `npm run dev`.
+
+### 0. Авторизация в Cloudflare
+
+```bash
+npx wrangler login
+```
+
+За корпоративным прокси OAuth-callback может не дойти. Тогда надёжнее
+создать API-токен (дашборд → My Profile → API Tokens → шаблон
+«Edit Cloudflare Workers») и экспортировать его:
+
+```bash
+export CLOUDFLARE_API_TOKEN=...
+```
+
 ### 1. KV для истории
 
 ```bash
 npx wrangler kv namespace create DATABASE
 ```
 
-Полученный `id` вписать в `wrangler.toml` в секцию `kv_namespaces`.
+Полученный `id` вписать в `wrangler.toml`, раскомментировав секцию
+`kv_namespaces` — до создания namespace она закомментирована, потому что
+пустой `id` не проходит валидацию конфига.
 
 ### 2. Секреты
 

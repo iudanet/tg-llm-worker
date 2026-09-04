@@ -4,11 +4,12 @@ compatibility_date = "2026-09-01"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 
-# KV для истории диалогов. ID создаётся командой:
-#   wrangler kv namespace create DATABASE
-kv_namespaces = [
-    { binding = "DATABASE", id = "" },
-]
+# KV для истории диалогов. Создать namespace и подставить выданный id:
+#   npx wrangler kv namespace create DATABASE
+# Пустой id не проходит валидацию, поэтому секция закомментирована до создания.
+# kv_namespaces = [
+#     { binding = "DATABASE", id = "СЮДА_ID_ИЗ_КОМАНДЫ_ВЫШЕ" },
+# ]
 
 [vars]
 CHAT_MODEL = "gpt-4.1-mini"
