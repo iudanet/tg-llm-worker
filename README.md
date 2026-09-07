@@ -69,12 +69,24 @@ CHAT_WHITE_LIST = "111111,222222"
 ### 4. Деплой и привязка webhook
 
 ```bash
-npx wrangler deploy
+npm run deploy
+```
+
+Скрипт сначала прогоняет `typecheck` и тесты и выкладывает воркер только
+если они прошли: `wrangler deploy` публикует код сразу, откатывать сложнее,
+чем не выложить.
+
+За корпоративным прокси `api.cloudflare.com` может не пройти (CONNECT
+возвращает 502) — тогда деплой снимает переменные прокси:
+
+```bash
+npm run deploy:noproxy
 ```
 
 Затем открыть в браузере корень воркера (`https://<name>.workers.dev/`)
 и нажать «Привязать webhook» — страница `/init` вызовет `setWebhook`
-и покажет ответ Telegram.
+и покажет ответ Telegram. Это же нужно после добавления команд: меню живёт
+на стороне Telegram и деплоем не обновляется.
 
 ### 5. Forum Topic Mode (для стриминга)
 
@@ -131,9 +143,13 @@ Bot API не присылает боту событий об удалении: �
 ## Разработка
 
 ```bash
-npm test          # vitest
-npm run typecheck # tsc --noEmit
-npm run dev       # локальный запуск
+npm test              # vitest
+npm run typecheck     # tsc --noEmit
+npm run check         # typecheck + тесты: гейт перед деплоем
+npm run dev           # локальный запуск
+npm run deploy        # check, затем wrangler deploy
+npm run deploy:noproxy # то же в обход прокси
+npm run deploy:force  # выложить без проверок (аварийный путь)
 ```
 
 ## Картинки
