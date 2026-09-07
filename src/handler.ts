@@ -13,7 +13,7 @@ import type { TelegramMessage, TelegramPhotoSize, TelegramUpdate } from './teleg
 import { deliverAnswer } from './telegram/deliver';
 import { DraftStreamer } from './telegram/stream';
 import { topicNameFrom } from './telegram/title';
-import { isLastInBatch, mergeBatch } from './batch/buffer';
+import { isLastInBatch, mergeBatch, shouldWaitLonger } from './batch/buffer';
 import { hydrateForLlm } from './vision/hydrate';
 import { imageKey, pickPhotoSize, toBase64 } from './vision/store';
 
@@ -60,6 +60,8 @@ export interface HandlerDeps {
     config: Config;
     /** Пауза перед проверкой буфера; в тестах подменяется. */
     sleep?: (ms: number) => Promise<void>;
+    /** Текущее время; в тестах подменяется вместе с sleep. */
+    now?: () => number;
 }
 
 /**
@@ -366,9 +368,34 @@ async function enqueue(
     }
 
     await deps.batches.append(scope, pending);
-    await (deps.sleep ?? defaultSleep)(deps.config.batchWindowMs);
 
-    const batch = await deps.batches.load(scope);
+    const sleep = deps.sleep ?? defaultSleep;
+    const now = deps.now ?? (() => Date.now());
+    const deadline = now() + deps.config.batchMaxWaitMs;
+
+    // Окно скользящее: каждое новое сообщение продлевает ожидание, поэтому
+    // серия любой длины склеивается, пока паузы внутри неё меньше окна.
+    // Потолок по времени обязателен: waitUntil живёт 30 с, и ответ модели
+    // тоже должен в них уложиться, поэтому непрерывный поток сообщений
+    // не может держать нас сколько угодно.
+    let batch = await deps.batches.load(scope);
+    while (true) {
+        await sleep(deps.config.batchWindowMs);
+        batch = await deps.batches.load(scope);
+        if (!shouldWaitLonger(batch, deps.config.batchWindowMs, now())) {
+            break;
+        }
+        if (now() >= deadline) {
+            // Серия ещё идёт, но ждать больше нельзя — отвечаем тем, что есть.
+            console.error(JSON.stringify({
+                msg: 'batch wait capped',
+                chat_id: message.chat.id,
+                pending: batch.messages.length,
+            }));
+            break;
+        }
+    }
+
     if (!isLastInBatch(batch, message.message_id)) {
         // Ответит более позднее сообщение — оно видит всю пачку.
         return;

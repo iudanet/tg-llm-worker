@@ -12,6 +12,12 @@ export interface PendingMessage {
 
 export interface PendingBatch {
     messages: PendingMessage[];
+    /**
+     * Момент последнего добавления, мс. Окно скользящее: каждое новое
+     * сообщение продлевает ожидание, поэтому серия любой длины склеивается,
+     * пока паузы внутри неё меньше окна.
+     */
+    updatedAt?: number;
 }
 
 export interface BatchScope {
@@ -54,15 +60,22 @@ export class BatchBuffer {
         return raw && Array.isArray(raw.messages) ? raw : { messages: [] };
     }
 
-    async append(scope: BatchScope, message: PendingMessage): Promise<PendingBatch> {
+    async append(
+        scope: BatchScope,
+        message: PendingMessage,
+        now: number = Date.now(),
+    ): Promise<PendingBatch> {
         const batch = await this.load(scope);
-        const messages = appendPending(batch.messages, message);
+        const next: PendingBatch = {
+            messages: appendPending(batch.messages, message),
+            updatedAt: now,
+        };
         // TTL страхует от зависшего буфера: окно ожидания — секунды,
         // поэтому минимальный TTL KV с запасом достаточен.
-        await this.kv.put(pendingKey(scope), JSON.stringify({ messages }), {
+        await this.kv.put(pendingKey(scope), JSON.stringify(next), {
             expirationTtl: this.ttlSeconds,
         });
-        return { messages };
+        return next;
     }
 
     async clear(scope: BatchScope): Promise<void> {
@@ -96,6 +109,27 @@ export function isLastInBatch(batch: PendingBatch, messageId: number): boolean {
         }
     }
     return true;
+}
+
+/**
+ * shouldWaitLonger reports that the burst is still arriving.
+ *
+ * Окно фиксированной длины разваливается на длинной серии: апдейты приходят
+ * не одновременно, и окно первого истекает раньше, чем доставлен последний.
+ * Поэтому окно скользящее — ждём, пока после последнего добавления не пройдёт
+ * BATCH_WINDOW_MS тишины.
+ */
+export function shouldWaitLonger(
+    batch: PendingBatch,
+    windowMs: number,
+    now: number,
+): boolean {
+    if (batch.updatedAt === undefined) {
+        return false;
+    }
+    const quietFor = now - batch.updatedAt;
+    // Отрицательное значение возможно при рассинхроне часов между изолятами.
+    return quietFor >= 0 && quietFor < windowMs;
 }
 
 /** Вопрос по умолчанию, если пришли только картинки без подписи. */

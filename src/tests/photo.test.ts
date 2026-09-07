@@ -24,7 +24,7 @@ function config(overrides: Partial<Config> = {}): Config {
         visionEnabled: true, visionContextImages: 2,
         imageTtlSeconds: 3600, imageMaxBytes: 1024 * 1024,
         // По умолчанию окно выключено: батчинг проверяется отдельными тестами.
-        batchWindowMs: 0,
+        batchWindowMs: 0, batchMaxWaitMs: 8000,
         ...overrides,
     };
 }
@@ -104,9 +104,16 @@ class FakeBatches {
         return this.store.get(pendingKey(scope)) ?? { messages: [] };
     }
 
-    async append(scope: BatchScope, message: PendingMessage): Promise<PendingBatch> {
+    async append(
+        scope: BatchScope,
+        message: PendingMessage,
+        now: number = Date.now(),
+    ): Promise<PendingBatch> {
         const current = await this.load(scope);
-        const batch = { messages: appendPending(current.messages, message) };
+        const batch = {
+            messages: appendPending(current.messages, message),
+            updatedAt: now,
+        };
         this.store.set(pendingKey(scope), batch);
         return batch;
     }
@@ -312,6 +319,80 @@ describe('bursts of messages', () => {
         const { seen } = await burst(['один вопрос']);
         expect(seen).toHaveLength(1);
         expect(seen[0]?.at(-1)?.content).toBe('один вопрос');
+    });
+});
+
+describe('slow bursts', () => {
+    /**
+     * Серия, растянутая дольше окна: сообщения приходят не одновременно.
+     * Фиксированное окно здесь развалилось бы — окно первого сообщения
+     * истекало бы раньше, чем доставлен последний, и ответов было бы несколько.
+     *
+     * Каждый апдейт обрабатывается своим handleUpdate, как в воркере; часы
+     * и сон подменены, поэтому тест не спит по-настоящему.
+     */
+    async function slowBurst(count: number, options: { maxWaitMs?: number } = {}) {
+        const WINDOW = 1500;
+        const START = 100_000;
+
+        const batches = new FakeBatches();
+        const { api, sent } = fakeApi();
+        const { provider, seen } = fakeProvider();
+        const history = new FakeHistory([]);
+        const images = new FakeImages();
+        const scope = { chatId: USER_ID, threadId: THREAD_ID };
+
+        let clock = START;
+        const deps = {
+            api,
+            provider,
+            history,
+            images: images as unknown as ImageStore,
+            batches: batches as unknown as BatchBufferLike,
+            config: config({
+                batchWindowMs: WINDOW,
+                batchMaxWaitMs: options.maxWaitMs ?? 8000,
+            }),
+            // Сон только двигает часы: доставку эмулирует цикл ниже.
+            sleep: async (ms: number) => {
+                clock += ms;
+            },
+            now: () => clock,
+        };
+
+        // Сообщения приходят по одному с паузой меньше окна, поэтому окно
+        // каждый раз продлевается.
+        const running: Array<Promise<void>> = [];
+        for (let index = 0; index < count; index += 1) {
+            const id = 10 + index;
+            const text = `сообщение ${index + 1}`;
+            clock += Math.floor(WINDOW / 2);
+            await batches.append(scope, { id, content: text }, clock);
+            running.push(handleUpdate(textUpdateWithId(text, id), deps));
+            // Даём обработчику дойти до своего первого сна.
+            await Promise.resolve();
+        }
+        await Promise.all(running);
+
+        return { sent, seen, history, batches, elapsed: () => clock - START };
+    }
+
+    it('answers once for a burst stretched beyond the window', async () => {
+        const { seen } = await slowBurst(5);
+        expect(seen).toHaveLength(1);
+    });
+
+    it('merges every message of a slow burst into one question', async () => {
+        const { seen } = await slowBurst(5);
+        const content = seen[0]?.at(-1)?.content as string;
+        expect(content).toContain('сообщение 1');
+        expect(content).toContain('сообщение 5');
+    });
+
+    it('caps the wait instead of following an endless stream', async () => {
+        const { seen } = await slowBurst(40, { maxWaitMs: 3000 });
+        // Хотя бы один ответ должен состояться, несмотря на поток.
+        expect(seen.length).toBeGreaterThanOrEqual(1);
     });
 });
 

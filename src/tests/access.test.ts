@@ -15,7 +15,7 @@ function configWith(ids: string | undefined): Config {
         visionEnabled: true, visionContextImages: 2,
         imageTtlSeconds: 3600, imageMaxBytes: 1024 * 1024,
         // Окно выключено: тесты проверяют поведение, а не ожидание.
-        batchWindowMs: 0,
+        batchWindowMs: 0, batchMaxWaitMs: 8000,
     };
 }
 

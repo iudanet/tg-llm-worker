@@ -6,6 +6,7 @@ import {
     isLastInBatch,
     mergeBatch,
     pendingKey,
+    shouldWaitLonger,
 } from '../batch/buffer';
 
 function pending(id: number, content: PendingMessage['content']): PendingMessage {
@@ -121,5 +122,36 @@ describe('mergeBatch', () => {
     it('always produces a user message', () => {
         const merged = mergeBatch({ messages: [pending(1, 'a'), pending(2, 'b')] });
         expect(merged?.role).toBe('user');
+    });
+});
+
+describe('shouldWaitLonger', () => {
+    const WINDOW = 1500;
+
+    it('keeps waiting while the burst is still arriving', () => {
+        // Сообщение добавлено 500 мс назад — серия ещё идёт.
+        const batch = { messages: [pending(1, 'a')], updatedAt: 10_000 };
+        expect(shouldWaitLonger(batch, WINDOW, 10_500)).toBe(true);
+    });
+
+    it('stops waiting once the window of silence has passed', () => {
+        const batch = { messages: [pending(1, 'a')], updatedAt: 10_000 };
+        expect(shouldWaitLonger(batch, WINDOW, 11_500)).toBe(false);
+    });
+
+    it('treats the exact window boundary as silence', () => {
+        const batch = { messages: [pending(1, 'a')], updatedAt: 10_000 };
+        expect(shouldWaitLonger(batch, WINDOW, 10_000 + WINDOW)).toBe(false);
+    });
+
+    it('does not wait on a buffer without a timestamp', () => {
+        // Записи от прежней версии воркера не должны подвешивать ответ.
+        expect(shouldWaitLonger({ messages: [pending(1, 'a')] }, WINDOW, 10_000)).toBe(false);
+    });
+
+    it('does not wait when the clock went backwards', () => {
+        // Изоляты в разных локациях могут расходиться по часам.
+        const batch = { messages: [pending(1, 'a')], updatedAt: 10_000 };
+        expect(shouldWaitLonger(batch, WINDOW, 9_000)).toBe(false);
     });
 });

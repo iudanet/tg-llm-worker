@@ -23,6 +23,7 @@ export interface Env {
     IMAGE_TTL_SECONDS?: string;
     IMAGE_MAX_BYTES?: string;
     BATCH_WINDOW_MS?: string;
+    BATCH_MAX_WAIT_MS?: string;
 }
 
 export interface Config {
@@ -45,6 +46,8 @@ export interface Config {
     imageMaxBytes: number;
     /** Окно ожидания соседних сообщений перед ответом, мс. 0 — выключено. */
     batchWindowMs: number;
+    /** Потолок суммарного ожидания серии, мс: дальше отвечаем тем, что есть. */
+    batchMaxWaitMs: number;
 }
 
 const DEFAULT_MODEL = 'gpt-5-mini';
@@ -65,6 +68,9 @@ const DEFAULT_IMAGE_MAX_BYTES = 1024 * 1024;
 // Пересылка и комментарий к ней приходят двумя апдейтами: ждём соседей,
 // чтобы ответить один раз и по полному вопросу.
 const DEFAULT_BATCH_WINDOW_MS = 1500;
+// waitUntil живёт 30 с, и из них ответ модели тоже должен успеть уложиться.
+// 8 с на сбор серии оставляют ~20 с на генерацию и доставку.
+const DEFAULT_BATCH_MAX_WAIT_MS = 8000;
 
 function parseIntOr(value: string | undefined, fallback: number): number {
     if (!value) {
@@ -125,5 +131,6 @@ export function loadConfig(env: Env): Config {
         imageTtlSeconds: parseIntOr(env.IMAGE_TTL_SECONDS, DEFAULT_IMAGE_TTL_SECONDS),
         imageMaxBytes: parseIntOr(env.IMAGE_MAX_BYTES, DEFAULT_IMAGE_MAX_BYTES),
         batchWindowMs: parseIntOr(env.BATCH_WINDOW_MS, DEFAULT_BATCH_WINDOW_MS),
+        batchMaxWaitMs: parseIntOr(env.BATCH_MAX_WAIT_MS, DEFAULT_BATCH_MAX_WAIT_MS),
     };
 }
