@@ -30,9 +30,27 @@ describe('audioFileName', () => {
         expect(audioFileName({ file_id: 'f', file_name: 'запись.m4a' })).toBe('запись.m4a');
     });
 
-    it('falls back to the name from file_path', () => {
-        // Расширение нужно эндпоинту для определения формата.
-        expect(audioFileName({ file_id: 'f' }, 'voice/file_12.oga')).toBe('file_12.oga');
+    it('rewrites .oga into .ogg — the API rejects oga', () => {
+        // Живой отказ: 400 "Unsupported file format oga".
+        expect(audioFileName({ file_id: 'f' }, 'voice/file_12.oga')).toBe('file_12.ogg');
+    });
+
+    it('rewrites an .oga name coming from file_name too', () => {
+        expect(audioFileName({ file_id: 'f', file_name: 'запись.oga' })).toBe('запись.ogg');
+    });
+
+    it('rewrites .opus into .ogg', () => {
+        expect(audioFileName({ file_id: 'f' }, 'voice/note.opus')).toBe('note.ogg');
+    });
+
+    it('keeps a supported extension as is', () => {
+        expect(audioFileName({ file_id: 'f' }, 'audio/file_3.mp3')).toBe('file_3.mp3');
+    });
+
+    it('falls back to the mime for an unknown extension', () => {
+        expect(
+            audioFileName({ file_id: 'f', mime_type: 'audio/ogg' }, 'voice/file.bin'),
+        ).toBe('audio.ogg');
     });
 
     it('builds a name from the mime when nothing else is known', () => {

@@ -33,22 +33,58 @@ export class TranscribeError extends Error {
 }
 
 /**
- * audioFileName picks a file name whose extension matches the payload.
+ * Расширения, которые принимает эндпоинт транскрипции.
+ * Списком проверяется всё, что приходит из Telegram: голосовые лежат
+ * в файлах с расширением .oga, а его API отвергает («Unsupported file
+ * format oga»), хотя тот же контейнер под именем .ogg принимается.
+ */
+const SUPPORTED_EXTENSIONS = new Set([
+    'flac', 'm4a', 'mp3', 'mp4', 'mpeg', 'mpga', 'oga', 'ogg', 'wav', 'webm',
+]);
+
+/** Расширения, которые эндпоинт не знает, но которые сводятся к известным. */
+const EXTENSION_ALIASES = new Map([
+    // Голосовые Telegram: контейнер OGG, но файл назван .oga.
+    ['oga', 'ogg'],
+    ['opus', 'ogg'],
+    ['ogv', 'ogg'],
+]);
+
+/**
+ * audioFileName picks a file name whose extension the API accepts.
  *
- * Эндпоинт определяет формат по расширению, поэтому имя важнее, чем кажется:
- * без него OGG от Telegram может быть отвергнут как неизвестный формат.
+ * Эндпоинт определяет формат по расширению, поэтому имя решает исход:
+ * голосовые Telegram лежат по пути вида voice/file_123.oga, и это имя
+ * отвергается. Расширение приводится к поддерживаемому, а при незнакомом
+ * берётся из MIME-типа.
  */
 export function audioFileName(voice: TelegramVoice, filePath?: string): string {
-    // Имя из Telegram (у audio-файлов) уже несёт верное расширение.
-    if (voice.file_name && voice.file_name.includes('.')) {
-        return voice.file_name;
+    const candidate = pickName(voice.file_name, filePath);
+    const extension = candidate?.split('.').pop()?.toLowerCase();
+
+    if (extension) {
+        const alias = EXTENSION_ALIASES.get(extension);
+        if (alias) {
+            return `${stripExtension(candidate!)}.${alias}`;
+        }
+        if (SUPPORTED_EXTENSIONS.has(extension)) {
+            return candidate!;
+        }
     }
-    // file_path от getFile тоже содержит расширение: voice/file_123.oga.
-    const fromPath = filePath?.split('/').pop();
-    if (fromPath?.includes('.')) {
-        return fromPath;
-    }
+    // Расширения нет или оно незнакомо — доверяем MIME-типу.
     return `audio.${extensionFor(voice.mime_type)}`;
+}
+
+function pickName(fileName?: string, filePath?: string): string | undefined {
+    if (fileName?.includes('.')) {
+        return fileName;
+    }
+    const fromPath = filePath?.split('/').pop();
+    return fromPath?.includes('.') ? fromPath : undefined;
+}
+
+function stripExtension(name: string): string {
+    return name.slice(0, name.lastIndexOf('.'));
 }
 
 /**
@@ -58,7 +94,8 @@ export function extensionFor(mime: string | undefined): string {
     switch (mime) {
         case 'audio/ogg':
         case 'audio/opus':
-            // Голосовые Telegram: контейнер OGG, кодек Opus.
+            // Голосовые Telegram: контейнер OGG, кодек Opus. Именно ogg,
+            // а не oga: API знает только первое написание.
             return 'ogg';
         case 'audio/mpeg':
         case 'audio/mp3':
