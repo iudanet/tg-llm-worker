@@ -6,6 +6,7 @@ import { OpenAIProvider } from './llm/openai';
 import { indexPage, initWebhook } from './routes';
 import { KVHistoryStore } from './storage/history';
 import { TelegramApi } from './telegram/api';
+import { BatchBuffer } from './batch/buffer';
 import { ImageStore } from './vision/store';
 
 export default {
@@ -90,6 +91,8 @@ async function handleWebhook(
         history: new KVHistoryStore(env.DATABASE, config.historyMaxMessages, config.historyTtlSeconds),
         // Картинки живут в том же namespace, но своими ключами и с меньшим TTL.
         images: new ImageStore(env.DATABASE, config.imageTtlSeconds),
+        // 60 с — минимальный TTL KV; окно ожидания измеряется секундами.
+        batches: new BatchBuffer(env.DATABASE, 60),
         config,
     };
 

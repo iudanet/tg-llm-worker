@@ -5,6 +5,7 @@ import type {
     ImageRefPart,
     StoredChatMessage,
 } from './llm/provider';
+import type { BatchBuffer, PendingMessage } from './batch/buffer';
 import type { ConversationKey, HistoryStore } from './storage/history';
 import type { ImageStore } from './vision/store';
 import type { TelegramApi } from './telegram/api';
@@ -12,6 +13,7 @@ import type { TelegramMessage, TelegramPhotoSize, TelegramUpdate } from './teleg
 import { deliverAnswer } from './telegram/deliver';
 import { DraftStreamer } from './telegram/stream';
 import { topicNameFrom } from './telegram/title';
+import { isLastInBatch, mergeBatch } from './batch/buffer';
 import { hydrateForLlm } from './vision/hydrate';
 import { imageKey, pickPhotoSize, toBase64 } from './vision/store';
 
@@ -53,7 +55,11 @@ export interface HandlerDeps {
     history: HistoryStore;
     /** Хранилище картинок: отдельные ключи, чтобы не раздувать историю. */
     images: ImageStore;
+    /** Буфер соседних сообщений, чтобы отвечать один раз на пачку. */
+    batches: BatchBuffer;
     config: Config;
+    /** Пауза перед проверкой буфера; в тестах подменяется. */
+    sleep?: (ms: number) => Promise<void>;
 }
 
 /**
@@ -261,12 +267,12 @@ async function handlePhoto(
         return;
     }
 
-    // Подпись к фото и есть вопрос пользователя; без неё спрашиваем сами.
-    const caption = message.caption?.trim() || 'Что на этом изображении?';
-    await runTurn({
-        role: 'user',
-        content: [{ type: 'text', text: caption }, stored],
-    }, message, deps);
+    // Подпись к фото — вопрос пользователя. Пустую подпись не подставляем
+    // своей: в альбоме вопрос может прийти отдельным сообщением.
+    const caption = message.caption?.trim();
+    await enqueue(message, deps, caption
+        ? [{ type: 'text', text: caption }, stored]
+        : [stored]);
 }
 
 /**
@@ -303,7 +309,78 @@ async function storePhoto(
 }
 
 async function handleChat(text: string, message: TelegramMessage, deps: HandlerDeps): Promise<void> {
-    await runTurn({ role: 'user', content: text }, message, deps);
+    await enqueue(message, deps, describeForward(message) + text);
+}
+
+/**
+ * describeForward prefixes a forwarded message so the model knows its origin.
+ * Без пометки модель принимает пересланный текст за слова пользователя.
+ */
+function describeForward(message: TelegramMessage): string {
+    const origin = message.forward_origin;
+    if (!origin) {
+        return '';
+    }
+    const author = origin.sender_user?.first_name
+        ?? origin.sender_user_name
+        ?? origin.chat?.title
+        ?? origin.author_signature;
+    return author
+        ? `[пересланное сообщение от ${author}]\n`
+        : '[пересланное сообщение]\n';
+}
+
+/** defaultSleep — пауза окна; в воркере это wall time, лимит CPU не тратится. */
+function defaultSleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * enqueue buffers one message and answers only for the last of a burst.
+ *
+ * Пересылка и комментарий к ней приходят двумя независимыми апдейтами:
+ * без буфера бот отвечал на каждый по отдельности, а вторая запись истории
+ * перетирала первую. Здесь сообщение копится в KV, затем выжидается окно,
+ * и отвечает только тот апдейт, после которого ничего не пришло.
+ *
+ * Ограничение KV: атомарности нет, записи расходятся между локациями. Если
+ * апдейты попали в разные изоляты, оба могут счесть себя последними — тогда
+ * поведение деградирует до прежнего, но ничего не ломается.
+ */
+async function enqueue(
+    message: TelegramMessage,
+    deps: HandlerDeps,
+    content: PendingMessage['content'],
+): Promise<void> {
+    const scope = { chatId: message.chat.id, threadId: message.message_thread_id };
+    const pending: PendingMessage = { id: message.message_id, content };
+
+    // Окно выключено — отвечаем сразу, но через ту же нормализацию,
+    // чтобы поведение не зависело от настройки.
+    if (deps.config.batchWindowMs <= 0) {
+        const single = mergeBatch({ messages: [pending] });
+        if (single) {
+            await runTurn(single, message, deps);
+        }
+        return;
+    }
+
+    await deps.batches.append(scope, pending);
+    await (deps.sleep ?? defaultSleep)(deps.config.batchWindowMs);
+
+    const batch = await deps.batches.load(scope);
+    if (!isLastInBatch(batch, message.message_id)) {
+        // Ответит более позднее сообщение — оно видит всю пачку.
+        return;
+    }
+
+    const merged = mergeBatch(batch);
+    if (!merged) {
+        return;
+    }
+    // Чистим буфер до ответа: иначе следующий вопрос склеится с этой пачкой.
+    await deps.batches.clear(scope);
+    await runTurn(merged, message, deps);
 }
 
 /**

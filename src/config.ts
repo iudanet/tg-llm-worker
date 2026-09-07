@@ -22,6 +22,7 @@ export interface Env {
     VISION_CONTEXT_IMAGES?: string;
     IMAGE_TTL_SECONDS?: string;
     IMAGE_MAX_BYTES?: string;
+    BATCH_WINDOW_MS?: string;
 }
 
 export interface Config {
@@ -42,6 +43,8 @@ export interface Config {
     visionContextImages: number;
     imageTtlSeconds: number;
     imageMaxBytes: number;
+    /** Окно ожидания соседних сообщений перед ответом, мс. 0 — выключено. */
+    batchWindowMs: number;
 }
 
 const DEFAULT_MODEL = 'gpt-5-mini';
@@ -59,6 +62,9 @@ const DEFAULT_IMAGE_TTL_SECONDS = 60 * 60 * 24;
 const DEFAULT_VISION_CONTEXT_IMAGES = 2;
 // Telegram сам пережимает фото (обычно 100-300 КБ); лимит отсекает крупное.
 const DEFAULT_IMAGE_MAX_BYTES = 1024 * 1024;
+// Пересылка и комментарий к ней приходят двумя апдейтами: ждём соседей,
+// чтобы ответить один раз и по полному вопросу.
+const DEFAULT_BATCH_WINDOW_MS = 1500;
 
 function parseIntOr(value: string | undefined, fallback: number): number {
     if (!value) {
@@ -118,5 +124,6 @@ export function loadConfig(env: Env): Config {
         visionContextImages: parseIntOr(env.VISION_CONTEXT_IMAGES, DEFAULT_VISION_CONTEXT_IMAGES),
         imageTtlSeconds: parseIntOr(env.IMAGE_TTL_SECONDS, DEFAULT_IMAGE_TTL_SECONDS),
         imageMaxBytes: parseIntOr(env.IMAGE_MAX_BYTES, DEFAULT_IMAGE_MAX_BYTES),
+        batchWindowMs: parseIntOr(env.BATCH_WINDOW_MS, DEFAULT_BATCH_WINDOW_MS),
     };
 }

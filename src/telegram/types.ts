@@ -24,6 +24,15 @@ export interface TelegramPhotoSize {
     file_size?: number;
 }
 
+/** Источник пересланного сообщения (Bot API 7.0+). */
+export interface TelegramForwardOrigin {
+    type: 'user' | 'hidden_user' | 'chat' | 'channel';
+    sender_user?: TelegramUser;
+    sender_user_name?: string;
+    chat?: TelegramChat;
+    author_signature?: string;
+}
+
 export interface TelegramMessage {
     message_id: number;
     message_thread_id?: number;
@@ -33,6 +42,10 @@ export interface TelegramMessage {
     date: number;
     text?: string;
     caption?: string;
+    /** Заполнено, если сообщение переслано. */
+    forward_origin?: TelegramForwardOrigin;
+    /** Общий идентификатор альбома: фото из одной отправки склеиваются. */
+    media_group_id?: string;
     entities?: unknown[];
     photo?: TelegramPhotoSize[];
     document?: { file_id: string; file_name?: string; mime_type?: string };

@@ -4,9 +4,11 @@ import type { ChatMessage, ChatProvider, StoredChatMessage, StreamCallbacks } fr
 import type { ConversationKey, HistoryStore } from '../storage/history';
 import type { TelegramApi } from '../telegram/api';
 import type { SendMessageParams, TelegramUpdate } from '../telegram/types';
+import type { BatchScope, PendingBatch, PendingMessage } from '../batch/buffer';
 import type { ImageStore } from '../vision/store';
 import { parseWhiteList } from '../config';
 import { handleUpdate } from '../handler';
+import { appendPending, pendingKey } from '../batch/buffer';
 import { conversationKey } from '../storage/history';
 
 const USER_ID = 42;
@@ -21,6 +23,8 @@ function config(overrides: Partial<Config> = {}): Config {
         documentThreshold: 4096, useRichMessages: false,
         visionEnabled: true, visionContextImages: 2,
         imageTtlSeconds: 3600, imageMaxBytes: 1024 * 1024,
+        // По умолчанию окно выключено: батчинг проверяется отдельными тестами.
+        batchWindowMs: 0,
         ...overrides,
     };
 }
@@ -92,6 +96,26 @@ function fakeApi(options: ApiOptions = {}) {
     return { api, sent, renamed };
 }
 
+/** Буфер пачек в памяти — та же логика, что в KV-реализации. */
+class FakeBatches {
+    readonly store = new Map<string, PendingBatch>();
+
+    async load(scope: BatchScope): Promise<PendingBatch> {
+        return this.store.get(pendingKey(scope)) ?? { messages: [] };
+    }
+
+    async append(scope: BatchScope, message: PendingMessage): Promise<PendingBatch> {
+        const current = await this.load(scope);
+        const batch = { messages: appendPending(current.messages, message) };
+        this.store.set(pendingKey(scope), batch);
+        return batch;
+    }
+
+    async clear(scope: BatchScope): Promise<void> {
+        this.store.delete(pendingKey(scope));
+    }
+}
+
 /** Провайдер, запоминающий то, что реально ушло в модель. */
 function fakeProvider(): { provider: ChatProvider; seen: ChatMessage[][] } {
     const seen: ChatMessage[][] = [];
@@ -129,23 +153,31 @@ function photoUpdate(caption?: string, fileSize?: number): TelegramUpdate {
     };
 }
 
+type BatchBufferLike = import('../batch/buffer').BatchBuffer;
+
 async function run(update: TelegramUpdate, options: {
     api?: ApiOptions;
     cfg?: Partial<Config>;
     preset?: StoredChatMessage[];
+    batches?: FakeBatches;
+    sleep?: (ms: number) => Promise<void>;
 } = {}) {
     const { api, sent, renamed } = fakeApi(options.api);
     const { provider, seen } = fakeProvider();
     const history = new FakeHistory(options.preset ?? []);
     const images = new FakeImages();
+    const batches = options.batches ?? new FakeBatches();
     await handleUpdate(update, {
         api,
         provider,
         history,
         images: images as unknown as ImageStore,
+        batches: batches as unknown as BatchBufferLike,
         config: config(options.cfg),
+        // Окно не выжидаем по-настоящему: тесты не должны спать.
+        sleep: options.sleep ?? (async () => {}),
     });
-    return { sent, seen, history, images, renamed };
+    return { sent, seen, history, images, renamed, batches };
 }
 
 /**
@@ -158,6 +190,20 @@ function textUpdate(text: string, threadId: number | null = THREAD_ID): Telegram
         message: {
             message_id: 3,
             ...(threadId === null ? {} : { message_thread_id: threadId }),
+            from: { id: USER_ID, is_bot: false, first_name: 'U' },
+            chat: { id: USER_ID, type: 'private' },
+            date: 0,
+            text,
+        },
+    };
+}
+
+function textUpdateWithId(text: string, messageId: number): TelegramUpdate {
+    return {
+        update_id: messageId,
+        message: {
+            message_id: messageId,
+            message_thread_id: THREAD_ID,
             from: { id: USER_ID, is_bot: false, first_name: 'U' },
             chat: { id: USER_ID, type: 'private' },
             date: 0,
@@ -197,6 +243,75 @@ describe('topic naming', () => {
         });
         expect(renamed).toEqual(['вопрос']);
         expect(seen).toHaveLength(1);
+    });
+});
+
+describe('bursts of messages', () => {
+    /**
+     * Пересылка и комментарий приходят двумя апдейтами. Оба обрабатываются
+     * общим буфером, поэтому здесь они прогоняются через один FakeBatches —
+     * так же, как это происходит в одном изоляте воркера.
+     */
+    async function burst(texts: string[], startId = 10) {
+        const batches = new FakeBatches();
+        const { api, sent, renamed } = fakeApi();
+        const { provider, seen } = fakeProvider();
+        const history = new FakeHistory([]);
+        const images = new FakeImages();
+
+        // Все апдейты кладутся в буфер до того, как истечёт окно первого:
+        // именно так выглядит быстрая серия сообщений.
+        const deps = {
+            api,
+            provider,
+            history,
+            images: images as unknown as ImageStore,
+            batches: batches as unknown as BatchBufferLike,
+            config: config({ batchWindowMs: 1500 }),
+            sleep: async () => {},
+        };
+
+        for (const [index, text] of texts.entries()) {
+            await batches.append(
+                { chatId: USER_ID, threadId: THREAD_ID },
+                { id: startId + index, content: text },
+            );
+        }
+        for (const [index, text] of texts.entries()) {
+            await handleUpdate(textUpdateWithId(text, startId + index), deps);
+        }
+        return { sent, seen, renamed, history, batches };
+    }
+
+    it('answers once for a forward and its comment', async () => {
+        const { seen } = await burst(['пересланный текст', 'что думаешь?']);
+        expect(seen).toHaveLength(1);
+    });
+
+    it('gives the model both messages as one question', async () => {
+        const { seen } = await burst(['пересланный текст', 'что думаешь?']);
+        expect(seen[0]?.at(-1)?.content).toBe('пересланный текст\n\nчто думаешь?');
+    });
+
+    it('saves one merged turn instead of overwriting history', async () => {
+        // Раньше две параллельные записи перетирали друг друга.
+        const { history } = await burst(['первое', 'второе']);
+        const saved = history.saved.get(`chat:${USER_ID}:${THREAD_ID}`);
+        expect(saved).toHaveLength(2);
+        expect(saved?.[0]?.content).toBe('первое\n\nвторое');
+        expect(saved?.[1]?.role).toBe('assistant');
+    });
+
+    it('clears the buffer so the next question starts clean', async () => {
+        const { batches } = await burst(['первое', 'второе']);
+        const left = await batches.load({ chatId: USER_ID, threadId: THREAD_ID });
+        expect(left.messages).toEqual([]);
+    });
+
+    it('answers a lone message without waiting for a partner', async () => {
+        const { seen } = await burst(['один вопрос']);
+        expect(seen).toHaveLength(1);
+        expect(seen[0]?.at(-1)?.content).toBe('один вопрос');
     });
 });
 

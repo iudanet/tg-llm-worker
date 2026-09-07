@@ -4,6 +4,7 @@ import type { ChatMessage, ChatProvider, StoredChatMessage, StreamCallbacks } fr
 import type { ConversationKey, HistoryStore } from '../storage/history';
 import type { TelegramApi } from '../telegram/api';
 import type { SendMessageParams, TelegramUpdate } from '../telegram/types';
+import type { BatchBuffer } from '../batch/buffer';
 import type { ImageStore } from '../vision/store';
 import { parseWhiteList } from '../config';
 import { BOT_COMMANDS, handleUpdate } from '../handler';
@@ -20,6 +21,8 @@ function config(): Config {
         documentThreshold: 4096, useRichMessages: true,
         visionEnabled: true, visionContextImages: 2,
         imageTtlSeconds: 3600, imageMaxBytes: 1024 * 1024,
+        // Окно выключено: тесты проверяют поведение, а не ожидание.
+        batchWindowMs: 0,
     };
 }
 
@@ -107,11 +110,24 @@ const images = {
     },
 } as unknown as ImageStore;
 
+/** Команды не буферизуются — буфер должен остаться нетронутым. */
+const batches = {
+    async append(): Promise<never> {
+        throw new Error('commands must not be buffered');
+    },
+    async load(): Promise<never> {
+        throw new Error('commands must not be buffered');
+    },
+    async clear(): Promise<never> {
+        throw new Error('commands must not be buffered');
+    },
+} as unknown as BatchBuffer;
+
 async function run(text: string, threadId?: number, options: { deleteOk?: boolean } = {}) {
     const { api, sent, deleted, calls } = fakeApi(options);
     const history = new FakeHistory(calls);
     await handleUpdate(commandUpdate(text, threadId), {
-        api, provider, history, images, config: config(),
+        api, provider, history, images, batches, config: config(),
     });
     return { history, sent, deleted, calls };
 }
