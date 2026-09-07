@@ -88,8 +88,12 @@ export async function initWebhook(request: Request, api: TelegramApi, config: Co
         allowed_updates: ['message'],
     });
 
-    // Меню команд живёт на стороне Telegram и переживает смену воркера,
-    // поэтому перезаписываем его вместе с привязкой webhook.
+    // Меню команд живёт на стороне Telegram и переживает смену воркера.
+    // Telegram хранит его по скоупам, и узкий перекрывает default, поэтому
+    // сначала чистим скоупы, которые мог занять предыдущий бот.
+    for (const type of ['all_private_chats', 'all_group_chats', 'all_chat_administrators']) {
+        await api.deleteMyCommands({ type });
+    }
     const commands = await api.setMyCommands(BOT_COMMANDS);
     const commandsStatus = commands.ok
         ? `<p class="ok">Меню команд обновлено: ${BOT_COMMANDS.map(c => `/${c.command}`).join(', ')}</p>`

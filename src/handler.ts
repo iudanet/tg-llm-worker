@@ -6,14 +6,26 @@ import type { TelegramMessage, TelegramUpdate } from './telegram/types';
 import { deliverAnswer } from './telegram/deliver';
 import { DraftStreamer } from './telegram/stream';
 
-/** BOT_COMMANDS публикуется в меню Telegram при инициализации воркера. */
+/**
+ * BOT_COMMANDS публикуется в меню Telegram при инициализации воркера.
+ * Порядок важен: Telegram показывает команды именно в этом порядке,
+ * а /start — первое, что видит новый пользователь.
+ */
 export const BOT_COMMANDS = [
+    { command: 'start', description: 'Начать диалог' },
     { command: 'new', description: 'Очистить контекст и начать заново' },
     { command: 'help', description: 'Справка по боту' },
 ];
 
+const START_TEXT = [
+    'Привет! Задайте вопрос — отвечу с помощью языковой модели.',
+    '',
+    'Контекст диалога помню, /new его очищает. Подробнее — /help.',
+].join('\n');
+
 const HELP_TEXT = [
     'Команды:',
+    '/start — начать диалог',
     '/new — начать новый диалог (очистить контекст)',
     '/help — эта справка',
     '',
@@ -108,13 +120,15 @@ async function handleCommand(text: string, message: TelegramMessage, deps: Handl
     const key: ConversationKey = { chatId, threadId: message.message_thread_id };
 
     switch (command) {
-        case '/new':
         case '/start':
+        case '/new':
             await deps.history.clear(key);
             await deps.api.sendMessage({
                 chat_id: chatId,
                 message_thread_id: message.message_thread_id,
-                text: 'Контекст очищен. Начинаем новый диалог.',
+                // /start у нового пользователя очищать нечего: приветствие
+                // уместнее рапорта об очистке контекста.
+                text: command === '/start' ? START_TEXT : 'Контекст очищен. Начинаем новый диалог.',
             });
             return;
         case '/help':

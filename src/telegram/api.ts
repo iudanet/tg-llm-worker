@@ -68,10 +68,29 @@ export class TelegramApi {
     }
 
     /**
-     * setMyCommands publishes the command menu shown in the Telegram UI.
+     * setMyCommands publishes the command menu for one scope.
      */
-    setMyCommands(commands: Array<{ command: string; description: string }>): Promise<ApiResponse<boolean>> {
-        return this.call<boolean>('setMyCommands', { commands });
+    setMyCommands(
+        commands: Array<{ command: string; description: string }>,
+        scope?: { type: string },
+    ): Promise<ApiResponse<boolean>> {
+        return this.call<boolean>('setMyCommands', scope ? { commands, scope } : { commands });
+    }
+
+    deleteMyCommands(scope?: { type: string }): Promise<ApiResponse<boolean>> {
+        return this.call<boolean>('deleteMyCommands', scope ? { scope } : {});
+    }
+
+    /**
+     * deleteForumTopic removes a topic together with all of its messages.
+     * Работает и в приватном чате: Bot API не сообщает боту об удалении треда
+     * пользователем, поэтому удаление инициирует сам бот по команде.
+     */
+    deleteForumTopic(chatId: number, messageThreadId: number): Promise<ApiResponse<boolean>> {
+        return this.call<boolean>('deleteForumTopic', {
+            chat_id: chatId,
+            message_thread_id: messageThreadId,
+        });
     }
 
     setWebhook(params: {
