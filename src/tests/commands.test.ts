@@ -7,7 +7,7 @@ import type { SendMessageParams, TelegramUpdate } from '../telegram/types';
 import type { BatchBuffer } from '../batch/buffer';
 import type { ImageStore } from '../vision/store';
 import { parseWhiteList } from '../config';
-import { BOT_COMMANDS, handleUpdate } from '../handler';
+import { BOT_COMMANDS, buildInfoText, handleUpdate } from '../handler';
 import { conversationKey } from '../storage/history';
 
 const USER_ID = 42;
@@ -139,7 +139,9 @@ describe('BOT_COMMANDS', () => {
     });
 
     it('publishes every command the handler answers', () => {
-        expect(BOT_COMMANDS.map(c => c.command)).toEqual(['start', 'new', 'delete', 'help']);
+        expect(BOT_COMMANDS.map(c => c.command)).toEqual(
+            ['start', 'new', 'delete', 'info', 'help'],
+        );
     });
 
     it('gives every command a description for the Telegram menu', () => {
@@ -225,6 +227,43 @@ describe('/delete', () => {
     it('accepts the /delete@botname form', async () => {
         const { deleted } = await run('/delete@mybot', 7);
         expect(deleted).toEqual([{ chatId: USER_ID, threadId: 7 }]);
+    });
+});
+
+describe('/info', () => {
+    it('answers with the build version', async () => {
+        const { sent } = await run('/info');
+        expect(sent[0]?.text).toContain('tg-llm-worker');
+    });
+
+    it('leaves the history untouched', async () => {
+        const { history } = await run('/info');
+        expect(history.cleared).toEqual([]);
+    });
+
+    it('names the configured model', () => {
+        expect(buildInfoText(config())).toContain('m');
+    });
+
+    it('promises vision only when it is enabled', () => {
+        const on = buildInfoText({ ...config(), visionEnabled: true });
+        const off = buildInfoText({ ...config(), visionEnabled: false });
+        expect(on).toContain('картинки и отвечать');
+        expect(off).toContain('картинки: выключено');
+    });
+
+    it('promises transcription only when it is enabled', () => {
+        const on = buildInfoText({ ...config(), transcribeEnabled: true });
+        const off = buildInfoText({ ...config(), transcribeEnabled: false });
+        expect(on).toContain('распознавать голосовые');
+        expect(off).toContain('выключено');
+    });
+
+    it('describes batching according to the window', () => {
+        const on = buildInfoText({ ...config(), batchWindowMs: 1500 });
+        const off = buildInfoText({ ...config(), batchWindowMs: 0 });
+        expect(on).toContain('склеивать серию');
+        expect(off).toContain('каждое сообщение отдельно');
     });
 });
 

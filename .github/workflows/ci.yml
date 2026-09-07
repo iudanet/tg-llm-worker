@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  check:
+    name: Typecheck and tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      # Тот же гейт, что и перед локальным деплоем.
+      - run: npm run check
+
+      # Сборка не требует ни ключей, ни сети — проверяем, что бандл собирается.
+      - name: Build bundle
+        run: npx wrangler deploy --dry-run --outdir dist

@@ -19,6 +19,7 @@ import { deliverAnswer } from './telegram/deliver';
 import { DraftStreamer } from './telegram/stream';
 import { topicNameFrom } from './telegram/title';
 import { audioFileName, transcribe, TranscribeError } from './audio/transcribe';
+import { BUILD_COMMIT, BUILD_VERSION } from './version';
 import { isLastInBatch, mergeBatch, shouldWaitLonger } from './batch/buffer';
 import { hydrateForLlm } from './vision/hydrate';
 import { imageKey, pickPhotoSize, toBase64 } from './vision/store';
@@ -32,6 +33,7 @@ export const BOT_COMMANDS = [
     { command: 'start', description: 'Начать диалог' },
     { command: 'new', description: 'Очистить контекст и начать заново' },
     { command: 'delete', description: 'Удалить этот топик вместе с контекстом' },
+    { command: 'info', description: 'Версия и возможности бота' },
     { command: 'help', description: 'Справка по боту' },
 ];
 
@@ -46,6 +48,7 @@ const HELP_TEXT = [
     '/start — начать диалог',
     '/new — начать новый диалог (очистить контекст)',
     '/delete — удалить этот топик вместе с контекстом',
+    '/info — версия и возможности',
     '/help — эта справка',
     '',
     'История хранится отдельно для каждого топика, поэтому /new очищает',
@@ -169,6 +172,13 @@ async function handleCommand(text: string, message: TelegramMessage, deps: Handl
         case '/delete':
             await deleteConversation(message, deps);
             return;
+        case '/info':
+            await deps.api.sendMessage({
+                chat_id: chatId,
+                message_thread_id: message.message_thread_id,
+                text: buildInfoText(deps.config),
+            });
+            return;
         case '/help':
             await deps.api.sendMessage({
                 chat_id: chatId,
@@ -183,6 +193,43 @@ async function handleCommand(text: string, message: TelegramMessage, deps: Handl
                 text: `Неизвестная команда. ${HELP_TEXT}`,
             });
     }
+}
+
+/**
+ * buildInfoText describes the build and what this bot can actually do.
+ *
+ * Возможности перечисляются по фактическим настройкам, а не списком из
+ * README: если vision или распознавание выключены, обещать их нельзя.
+ */
+export function buildInfoText(config: Config): string {
+    const lines = [
+        `tg-llm-worker ${BUILD_VERSION} (${BUILD_COMMIT})`,
+        '',
+        'Telegram-бот с языковой моделью на Cloudflare Workers.',
+        '',
+        `Модель: ${config.model}`,
+        `Контекст: до ${config.historyMaxMessages} сообщений, ` +
+            `сброс через ${Math.round(config.historyTtlSeconds / 3600)} ч`,
+        '',
+        'Умеет:',
+        '• отвечать текстом со стримингом ответа',
+        config.visionEnabled
+            ? `• читать картинки и отвечать на вопросы по ним (до ${config.visionContextImages} в контексте)`
+            : '• картинки: выключено',
+        config.transcribeEnabled
+            ? '• распознавать голосовые и аудио'
+            : '• распознавание голоса: выключено',
+        config.batchWindowMs > 0
+            ? '• склеивать серию сообщений подряд в один ответ'
+            : '• отвечать на каждое сообщение отдельно',
+        '• отдавать длинный ответ файлом .md',
+        '',
+        'Не умеет: генерировать картинки, читать файлы и видео,',
+        'ходить во внешние API.',
+        '',
+        'Исходники: https://github.com/iudanet/tg-llm-worker',
+    ];
+    return lines.join('\n');
 }
 
 /**

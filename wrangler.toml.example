@@ -14,6 +14,13 @@ kv_namespaces = [
     { binding = "DATABASE", id = "ВАШ_KV_NAMESPACE_ID" },
 ]
 
+# Версия и коммит вкомпилируются в бандл: в Workers нет файловой системы,
+# поэтому package.json в рантайме не прочитать. CI подставляет реальные
+# значения через --define, здесь — заглушки для локальной сборки.
+[define]
+__APP_VERSION__ = "\"dev\""
+__APP_COMMIT__ = "\"local\""
+
 [vars]
 # Модель должна поддерживать vision, если нужен приём картинок.
 CHAT_MODEL = "gpt-5-mini"

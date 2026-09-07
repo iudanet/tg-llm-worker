@@ -1,6 +1,6 @@
 {
   "name": "tg-llm-worker",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Telegram-бот с LLM на Cloudflare Workers: стриминг, картинки, распознавание голосовых",
   "license": "MIT",
   "keywords": [
