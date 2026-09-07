@@ -14,6 +14,12 @@
     "prefer-const": "error",
     "no-throw-literal": "error",
 
+    // Опасные конструкции: динамическое исполнение строк и javascript:-ссылки.
+    "no-eval": "error",
+    "no-implied-eval": "error",
+    "no-new-func": "error",
+    "no-script-url": "error",
+
     // Логи структурированные, console.error — штатный вывод воркера.
     "no-console": "off",
     // await в цикле здесь намеренный: чтение SSE-потока, скачивание картинок

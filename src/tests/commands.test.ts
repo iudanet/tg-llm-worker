@@ -14,7 +14,7 @@ const USER_ID = 42;
 
 function config(): Config {
     return {
-        botToken: 't', webhookSecret: null, apiKey: 'k',
+        botToken: 't', webhookSecret: 's', apiKey: 'k',
         apiBase: 'https://example.invalid/v1', model: 'm', systemPrompt: null,
         whiteList: parseWhiteList(String(USER_ID)), historyMaxMessages: 20,
         historyTtlSeconds: 60, streamIntervalMs: 1000,

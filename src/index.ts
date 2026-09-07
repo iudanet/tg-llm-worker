@@ -17,7 +17,8 @@ export default {
         } catch (error) {
             const detail = error instanceof Error ? error.message : String(error);
             console.error(JSON.stringify({ msg: 'invalid configuration', error: detail }));
-            return new Response(`Configuration error: ${detail}`, { status: 500 });
+            // Детали — только в лог: наружу отдаём нейтральный текст.
+            return new Response('Worker is not configured', { status: 500 });
         }
 
         const url = new URL(request.url);
@@ -41,16 +42,28 @@ export default {
 };
 
 /**
+ * safeEqual compares two secrets without leaking their length difference.
+ * Практически timing-атака здесь неэксплуатируема из-за сетевого шума,
+ * но постоянное по времени сравнение ничего не стоит.
+ */
+function safeEqual(a: string, b: string): boolean {
+    const encoder = new TextEncoder();
+    const left = encoder.encode(a);
+    const right = encoder.encode(b);
+    if (left.byteLength !== right.byteLength) {
+        return false;
+    }
+    return crypto.subtle.timingSafeEqual(left, right);
+}
+
+/**
  * isAuthorized guards the service pages with the webhook secret.
  * Секрет передаётся в query-параметре: страницы открываются из браузера,
  * где заголовок не проставить.
  */
 function isAuthorized(url: URL, config: ReturnType<typeof loadConfig>): boolean {
-    if (!config.webhookSecret) {
-        // Без секрета защищать нечем — не открываем служебные страницы вовсе.
-        return false;
-    }
-    return url.searchParams.get('token') === config.webhookSecret;
+    const provided = url.searchParams.get('token');
+    return provided !== null && safeEqual(provided, config.webhookSecret);
 }
 
 async function handleWebhook(
@@ -60,13 +73,12 @@ async function handleWebhook(
     api: TelegramApi,
     config: ReturnType<typeof loadConfig>,
 ): Promise<Response> {
-    // Telegram присылает секрет в заголовке; без проверки webhook может дёрнуть кто угодно.
-    if (config.webhookSecret) {
-        const provided = request.headers.get('X-Telegram-Bot-Api-Secret-Token');
-        if (provided !== config.webhookSecret) {
-            console.error(JSON.stringify({ msg: 'webhook secret mismatch' }));
-            return new Response('Forbidden', { status: 403 });
-        }
+    // Секрет обязателен (loadConfig это гарантирует): без проверки апдейт
+    // мог бы прислать кто угодно, а whitelist доверяет from.id из тела.
+    const provided = request.headers.get('X-Telegram-Bot-Api-Secret-Token');
+    if (provided === null || !safeEqual(provided, config.webhookSecret)) {
+        console.error(JSON.stringify({ msg: 'webhook secret mismatch' }));
+        return new Response('Forbidden', { status: 403 });
     }
 
     let update: TelegramUpdate;

@@ -7,7 +7,7 @@ import { buildPreview } from '../telegram/deliver';
 
 function configWith(ids: string | undefined): Config {
     return {
-        botToken: 't', webhookSecret: null, apiKey: 'k',
+        botToken: 't', webhookSecret: 's', apiKey: 'k',
         apiBase: 'https://example.invalid/v1', model: 'm', systemPrompt: null,
         whiteList: parseWhiteList(ids), historyMaxMessages: 20,
         historyTtlSeconds: 60, streamIntervalMs: 1000,

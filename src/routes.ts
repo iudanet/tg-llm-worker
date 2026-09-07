@@ -3,6 +3,25 @@ import type { TelegramApi } from './telegram/api';
 import { BOT_COMMANDS } from './handler';
 
 /**
+ * escapeHtml neutralises markup in interpolated values.
+ *
+ * Значения приходят из конфигурации оператора и ответов Telegram, поэтому
+ * практической XSS здесь нет — но страницу видно только владельцу секрета,
+ * а код уйдёт в паблик и будет копироваться.
+ */
+export function escapeHtml(value: string): string {
+    return value.replace(/[&<>"']/g, char => ESCAPES[char] ?? char);
+}
+
+const ESCAPES: Record<string, string> = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+};
+
+/**
  * renderPage wraps content into a minimal self-contained HTML document.
  */
 function renderPage(title: string, body: string): Response {
@@ -34,7 +53,15 @@ function renderPage(title: string, body: string): Response {
 </html>`;
     return new Response(html, {
         status: 200,
-        headers: { 'Content-Type': 'text/html; charset=utf-8' },
+        headers: {
+            'Content-Type': 'text/html; charset=utf-8',
+            // Страница содержит секрет в ссылках — не кэшируем и не отдаём
+            // его во внешние запросы через Referer.
+            'Cache-Control': 'no-store',
+            'Referrer-Policy': 'no-referrer',
+            'X-Content-Type-Options': 'nosniff',
+            'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'",
+        },
     });
 }
 
@@ -46,21 +73,17 @@ export function indexPage(request: Request, config: Config): Response {
     const keyNote = config.apiKey
         ? ''
         : '<p class="err">OPENAI_API_KEY не задан: <code>npx wrangler secret put OPENAI_API_KEY</code></p>';
-    const secretNote = config.webhookSecret
-        ? '<p class="ok">Secret token настроен — webhook будет привязан с проверкой подписи.</p>'
-        : '<p class="err">TELEGRAM_WEBHOOK_SECRET не задан. Любой, кто знает адрес воркера, сможет слать боту апдейты.</p>';
 
     return renderPage('tg-llm-worker', `
 <h1>tg-llm-worker</h1>
-<p>Воркер запущен на <code>${origin}</code>.</p>
+<p>Воркер запущен на <code>${escapeHtml(origin)}</code>.</p>
 <h2>Подключение</h2>
 <p>Чтобы Telegram начал слать сообщения этому воркеру, нужно привязать webhook:</p>
-<p><a class="button" href="./init?token=${encodeURIComponent(config.webhookSecret ?? '')}">Привязать webhook</a></p>
-${secretNote}
+<p><a class="button" href="./init?token=${encodeURIComponent(config.webhookSecret)}">Привязать webhook</a></p>
 ${keyNote}
 <h2>Текущая конфигурация</h2>
-<pre>модель:            ${config.model}
-API base:          ${config.apiBase}
+<pre>модель:            ${escapeHtml(config.model)}
+API base:          ${escapeHtml(config.apiBase)}
 whitelist:         ${config.whiteList.size} пользователей
 история:           до ${config.historyMaxMessages} сообщений, TTL ${Math.round(config.historyTtlSeconds / 3600)} ч
 порог файла:       ${config.documentThreshold} символов
@@ -84,7 +107,7 @@ export async function initWebhook(request: Request, api: TelegramApi, config: Co
 
     const result = await api.setWebhook({
         url: webhookUrl,
-        secret_token: config.webhookSecret ?? undefined,
+        secret_token: config.webhookSecret,
         allowed_updates: ['message'],
     });
 
@@ -97,17 +120,17 @@ export async function initWebhook(request: Request, api: TelegramApi, config: Co
     const commands = await api.setMyCommands(BOT_COMMANDS);
     const commandsStatus = commands.ok
         ? `<p class="ok">Меню команд обновлено: ${BOT_COMMANDS.map(c => `/${c.command}`).join(', ')}</p>`
-        : `<p class="err">Не удалось обновить меню команд: ${commands.description ?? 'неизвестная ошибка'}</p>`;
+        : `<p class="err">Не удалось обновить меню команд: ${escapeHtml(commands.description ?? 'неизвестная ошибка')}</p>`;
 
     const status = result.ok
-        ? `<p class="ok">Webhook привязан к <code>${webhookUrl}</code></p>`
-        : `<p class="err">Не удалось привязать webhook: ${result.description ?? 'неизвестная ошибка'}</p>`;
+        ? `<p class="ok">Webhook привязан к <code>${escapeHtml(webhookUrl)}</code></p>`
+        : `<p class="err">Не удалось привязать webhook: ${escapeHtml(result.description ?? 'неизвестная ошибка')}</p>`;
 
     return renderPage('tg-llm-worker — init', `
 <h1>Привязка webhook</h1>
 ${status}
 ${commandsStatus}
-<pre>${JSON.stringify(result, null, 2)}</pre>
-<p><a href="./?token=${encodeURIComponent(config.webhookSecret ?? '')}">← назад</a></p>
+<pre>${escapeHtml(JSON.stringify(result, null, 2))}</pre>
+<p><a href="./?token=${encodeURIComponent(config.webhookSecret)}">← назад</a></p>
 `);
 }

@@ -1,0 +1,61 @@
+# Хуки, не дающие утечь секретам, персональным данным и бинарникам.
+# Установка: pre-commit install
+# Разовая проверка всего репозитория: pre-commit run --all-files
+minimum_pre_commit_version: '3.0.0'
+
+repos:
+  # Сканер секретов: токены Telegram/OpenAI/Cloudflare плюс правила
+  # из .gitleaks.toml (реальные user id, KV namespace id).
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.24.3
+    hooks:
+      - id: gitleaks
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      # Приватные ключи в коммите.
+      - id: detect-private-key
+      # Крупные файлы: бинарники и дампы обычно попадают случайно.
+      - id: check-added-large-files
+        args: ['--maxkb=200']
+      - id: check-merge-conflict
+      - id: check-json
+        # .oxlintrc.json — формально JSONC: oxlint допускает комментарии,
+        # а объяснения к выключенным правилам важнее формального соответствия.
+        exclude: '^\.oxlintrc\.json$'
+      - id: check-yaml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+
+  - repo: local
+    hooks:
+      # Локальный конфиг несёт KV id и список допущенных пользователей.
+      # language: fail срабатывает на само наличие файла в индексе,
+      # поэтому обойти его через `git add -f` не получится.
+      - id: forbid-local-config
+        name: локальный конфиг wrangler / .dev.vars / .env
+        language: fail
+        entry: >-
+          Этот файл не должен попадать в репозиторий: он содержит KV namespace id,
+          список допущенных user id или секреты. Шаблон — wrangler.toml.example.
+        files: '^(wrangler\.(toml|json|jsonc)|wrangler\..+\.(toml|json|jsonc)|\.dev\.vars.*|\.env.*)$'
+
+      # Бинарники и медиа: в этом репозитории их быть не должно, а один
+      # скриншот уже пришлось вычищать из истории через git-filter-repo.
+      - id: forbid-binaries
+        name: бинарные файлы и медиа
+        language: fail
+        entry: >-
+          Бинарные файлы в этот репозиторий не коммитятся: они остаются
+          в истории навсегда даже после удаления.
+        files: '\.(jpg|jpeg|png|gif|webp|bmp|ico|svg|pdf|zip|gz|tgz|tar|7z|rar|mp3|mp4|ogg|oga|opus|wav|webm|mov|exe|dll|so|dylib|bin|dat|db|sqlite3?)$'
+
+      # Тот же гейт, что перед деплоем: линтер ловит и небезопасные
+      # конструкции (no-eval, no-implied-eval, no-script-url).
+      - id: oxlint
+        name: oxlint
+        language: system
+        entry: npx oxlint
+        pass_filenames: false
+        types_or: [ts, javascript]

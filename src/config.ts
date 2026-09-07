@@ -31,7 +31,12 @@ export interface Env {
 
 export interface Config {
     botToken: string;
-    webhookSecret: string | null;
+    /**
+     * Обязателен: без него POST /webhook принимал бы апдейты от кого угодно,
+     * а whitelist проверяет from.id из того же тела запроса — то есть стал бы
+     * декоративным. Секрет — единственное, что делает его реальной защитой.
+     */
+    webhookSecret: string;
     apiKey: string;
     apiBase: string;
     model: string;
@@ -113,6 +118,17 @@ export function parseWhiteList(raw: string | undefined): Set<number> {
 }
 
 /**
+ * requireHttps rejects a plaintext API base.
+ * По http ключ ушёл бы в заголовке Authorization открытым текстом.
+ */
+function requireHttps(apiBase: string): string {
+    if (!apiBase.startsWith('https://')) {
+        throw new Error('OPENAI_API_BASE must use https');
+    }
+    return apiBase;
+}
+
+/**
  * loadConfig reads the runtime configuration from the worker environment.
  *
  * Отсутствие ключа модели здесь не является ошибкой: страница с инструкцией
@@ -123,11 +139,17 @@ export function loadConfig(env: Env): Config {
     if (!env.TELEGRAM_BOT_TOKEN) {
         throw new Error('TELEGRAM_BOT_TOKEN is not configured');
     }
+    // Fail closed: недонастроенный воркер не должен принимать апдейты вовсе.
+    if (!env.TELEGRAM_WEBHOOK_SECRET) {
+        throw new Error('TELEGRAM_WEBHOOK_SECRET is not configured');
+    }
     return {
         botToken: env.TELEGRAM_BOT_TOKEN,
-        webhookSecret: env.TELEGRAM_WEBHOOK_SECRET || null,
+        webhookSecret: env.TELEGRAM_WEBHOOK_SECRET,
         apiKey: env.OPENAI_API_KEY ?? '',
-        apiBase: (env.OPENAI_API_BASE || DEFAULT_API_BASE).replace(/\/+$/, ''),
+        apiBase: requireHttps(
+            (env.OPENAI_API_BASE || DEFAULT_API_BASE).replace(/\/+$/, ''),
+        ),
         model: env.CHAT_MODEL || DEFAULT_MODEL,
         systemPrompt: env.SYSTEM_PROMPT || null,
         whiteList: parseWhiteList(env.CHAT_WHITE_LIST),

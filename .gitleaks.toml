@@ -1,0 +1,75 @@
+title = "tg-llm-worker"
+
+# useDefault подтягивает встроенный набор правил gitleaks. В сборке, которую
+# ставит pre-commit, он на пробных токенах не срабатывал, поэтому важные для
+# этого проекта секреты описаны явно ниже — защита не зависит от версии.
+[extend]
+useDefault = true
+
+# --- Секреты, с которыми работает именно этот проект ---
+
+[[rules]]
+id = "telegram-bot-token"
+description = "Токен Telegram-бота"
+regex = "[0-9]{8,10}:AA[A-Za-z0-9_-]{32,}"
+keywords = ["AA"]
+
+[[rules]]
+id = "openai-api-key"
+description = "Ключ OpenAI"
+regex = "sk-[A-Za-z0-9_-]{20,}"
+keywords = ["sk-"]
+
+[[rules]]
+id = "cloudflare-api-token"
+description = "API-токен Cloudflare"
+regex = "(?i)cloudflare[_-]?api[_-]?token[\"'\\s:=]+[A-Za-z0-9_-]{30,}"
+keywords = ["cloudflare"]
+
+[[rules]]
+id = "generic-assigned-secret"
+description = "Присвоение секрета в коде"
+regex = "(?i)(api[_-]?key|secret|token|password)\\s*[:=]\\s*[\"'][A-Za-z0-9_\\-\\.]{24,}[\"']"
+keywords = ["key", "secret", "token", "password"]
+
+  [rules.allowlist]
+  description = "Плейсхолдеры, примеры и тестовые данные"
+  regexes = [
+    "(?i)(your|example|placeholder|changeme|dummy|fake|xxx)",
+    "ВАШ_",
+  ]
+  paths = [
+    "src/tests/.*",
+    "\\.example$",
+  ]
+
+# --- Персональные данные и идентификаторы инфраструктуры ---
+
+# Реальные Telegram user id: по такому id можно написать человеку в личку.
+[[rules]]
+id = "tg-whitelist-real-ids"
+description = "CHAT_WHITE_LIST с похожими на реальные user id"
+regex = "CHAT_WHITE_LIST\\s*=\\s*\"[0-9]{6,}[0-9,\\s]*\""
+keywords = ["CHAT_WHITE_LIST"]
+
+  [rules.allowlist]
+  description = "Примеры из документации"
+  regexes = ["111111,222222"]
+
+# Cloudflare KV namespace id — 32 hex-символа в конфиге воркера.
+[[rules]]
+id = "cf-kv-namespace-id"
+description = "KV namespace id в конфиге wrangler"
+regex = "id\\s*=\\s*\"[0-9a-f]{32}\""
+keywords = ["id"]
+
+  [rules.allowlist]
+  description = "Плейсхолдер в шаблоне"
+  regexes = ["ВАШ_KV_NAMESPACE_ID"]
+
+[allowlist]
+description = "Файлы, которые нет смысла сканировать"
+paths = [
+  "package-lock\\.json$",
+  "\\.gitleaks\\.toml$",
+]
