@@ -4,6 +4,10 @@ dist/
 .dev.vars
 *.log
 
+# Локальный конфиг: содержит id вашего KV и список допущенных user id.
+# Шаблон — wrangler.toml.example.
+wrangler.toml
+
 # скриншоты и присланные картинки
 photo_*.jpg
 *.png

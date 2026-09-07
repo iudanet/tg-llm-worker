@@ -37,17 +37,24 @@ npx wrangler login
 export CLOUDFLARE_API_TOKEN=...
 ```
 
-### 1. KV для истории
+### 1. Конфиг из шаблона
+
+```bash
+cp wrangler.toml.example wrangler.toml
+```
+
+`wrangler.toml` в `.gitignore`: он содержит id вашего KV и список допущенных
+пользователей, поэтому в репозиторий не попадает.
+
+### 2. KV для истории
 
 ```bash
 npx wrangler kv namespace create DATABASE
 ```
 
-Полученный `id` вписать в `wrangler.toml`, раскомментировав секцию
-`kv_namespaces` — до создания namespace она закомментирована, потому что
-пустой `id` не проходит валидацию конфига.
+Полученный `id` вписать в `wrangler.toml` вместо `ВАШ_KV_NAMESPACE_ID`.
 
-### 2. Секреты
+### 3. Секреты
 
 ```bash
 npx wrangler secret put TELEGRAM_BOT_TOKEN
@@ -55,7 +62,7 @@ npx wrangler secret put TELEGRAM_WEBHOOK_SECRET   # любая случайна�
 npx wrangler secret put OPENAI_API_KEY
 ```
 
-### 3. Whitelist
+### 4. Whitelist
 
 В `wrangler.toml` перечислить Telegram user id через запятую:
 
@@ -63,10 +70,12 @@ npx wrangler secret put OPENAI_API_KEY
 CHAT_WHITE_LIST = "111111,222222"
 ```
 
+Свой id можно узнать у [@userinfobot](https://t.me/userinfobot).
+
 Пустой список означает, что бот не отвечает никому — это защита от случайного
 открытого доступа, а не «пускать всех».
 
-### 4. Деплой и привязка webhook
+### 5. Деплой и привязка webhook
 
 ```bash
 npm run deploy
@@ -88,7 +97,7 @@ npm run deploy:noproxy
 и покажет ответ Telegram. Это же нужно после добавления команд: меню живёт
 на стороне Telegram и деплоем не обновляется.
 
-### 5. Forum Topic Mode (для стриминга)
+### 6. Forum Topic Mode (для стриминга)
 
 `sendMessageDraft` работает **только в личных чатах** и требует включённого
 Forum Topic Mode: @BotFather → Bot Settings → Group Privacy → Forum Topic Mode.
@@ -250,3 +259,7 @@ npm run deploy:force  # выложить без проверок (аварийн
 Текстовый диалог со стримингом, приём картинок, распознавание голосовых,
 склейка серии сообщений. Не сделано: генерация изображений, файлы в контекст,
 второй провайдер, вызов внешних API (скилы).
+
+## Лицензия
+
+MIT — см. [LICENSE](LICENSE).

@@ -1,7 +1,16 @@
 {
   "name": "tg-llm-worker",
   "version": "0.1.0",
-  "private": true,
+  "description": "Telegram-бот с LLM на Cloudflare Workers: стриминг, картинки, распознавание голосовых",
+  "license": "MIT",
+  "keywords": [
+    "telegram-bot",
+    "cloudflare-workers",
+    "llm",
+    "openai",
+    "vision",
+    "speech-to-text"
+  ],
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",

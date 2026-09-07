@@ -4,21 +4,38 @@ compatibility_date = "2026-09-01"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 
-# KV для истории диалогов (создан командой wrangler kv namespace create DATABASE).
+# Скопируйте этот файл в wrangler.toml и подставьте свои значения.
+# Сам wrangler.toml в .gitignore: он содержит id вашего KV и список
+# допущенных пользователей.
+
+# KV для истории диалогов. Создать и получить id:
+#   npx wrangler kv namespace create DATABASE
 kv_namespaces = [
     { binding = "DATABASE", id = "ВАШ_KV_NAMESPACE_ID" },
 ]
 
 [vars]
+# Модель должна поддерживать vision, если нужен приём картинок.
 CHAT_MODEL = "gpt-5-mini"
-# Список Telegram user id через запятую. Пустой список = бот никого не обслуживает.
-# Свой Telegram user id можно узнать у @userinfobot.
+
+# Telegram user id через запятую. Пустой список = бот не отвечает никому:
+# это защита от случайного открытого доступа, а не «пускать всех».
+# Свой id можно узнать у @userinfobot.
 CHAT_WHITE_LIST = ""
+
+# Глубина контекста и его автосброс (7 дней).
 HISTORY_MAX_MESSAGES = "20"
 HISTORY_TTL_SECONDS = "604800"
+
+# Троттлинг обновлений черновика при стриминге.
 STREAM_INTERVAL_MS = "1200"
+
+# Ответы длиннее порога уходят файлом .md.
 DOCUMENT_THRESHOLD = "4096"
+
+# Rich Messages вместо MarkdownV2 — не нужно экранировать разметку.
 USE_RICH_MESSAGES = "true"
+
 # Приём картинок. Модель в CHAT_MODEL должна поддерживать vision.
 VISION_ENABLED = "true"
 # Сколько последних картинок прикладывать к запросу: каждая тарифицируется
@@ -28,6 +45,7 @@ VISION_CONTEXT_IMAGES = "2"
 IMAGE_TTL_SECONDS = "86400"
 # Лимит на исходный файл. Telegram сам жмёт фото до ~100-300 КБ.
 IMAGE_MAX_BYTES = "1048576"
+
 # Пересылка и комментарий к ней приходят двумя апдейтами. Бот ждёт это окно
 # тишины и отвечает один раз на всю серию; каждое новое сообщение окно
 # продлевает. 0 — отвечать на каждое сообщение сразу.
@@ -35,14 +53,20 @@ BATCH_WINDOW_MS = "1500"
 # Потолок суммарного ожидания: дальше отвечаем тем, что успело прийти.
 # waitUntil живёт 30 с, из них ответ модели тоже должен уложиться.
 BATCH_MAX_WAIT_MS = "8000"
+
 # Распознавание голосовых сообщений.
 TRANSCRIBE_ENABLED = "true"
 TRANSCRIBE_MODEL = "gpt-4o-mini-transcribe"
 # getFile отдаёт файлы до 20 МБ — это и есть реальный предел.
 AUDIO_MAX_BYTES = "20971520"
+
+# Системный промпт — необязателен.
 # SYSTEM_PROMPT = "Ты полезный ассистент. Отвечай по-русски."
 
+# Совместимый эндпоинт, если нужен прокси или другой провайдер.
+# OPENAI_API_BASE = "https://api.openai.com/v1"
+
 # Секреты задаются отдельно, НЕ в этом файле:
-#   wrangler secret put TELEGRAM_BOT_TOKEN
-#   wrangler secret put TELEGRAM_WEBHOOK_SECRET
-#   wrangler secret put OPENAI_API_KEY
+#   npx wrangler secret put TELEGRAM_BOT_TOKEN
+#   npx wrangler secret put TELEGRAM_WEBHOOK_SECRET
+#   npx wrangler secret put OPENAI_API_KEY
