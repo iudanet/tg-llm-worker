@@ -1,4 +1,4 @@
-import type { ChatMessage } from '../llm/provider';
+import type { StoredChatMessage } from '../llm/provider';
 
 /**
  * HistoryStore persists per-chat conversation context in Workers KV.
@@ -16,8 +16,8 @@ export interface ConversationKey {
 }
 
 export interface HistoryStore {
-    load: (key: ConversationKey) => Promise<ChatMessage[]>;
-    save: (key: ConversationKey, messages: ChatMessage[]) => Promise<void>;
+    load: (key: ConversationKey) => Promise<StoredChatMessage[]>;
+    save: (key: ConversationKey, messages: StoredChatMessage[]) => Promise<void>;
     clear: (key: ConversationKey) => Promise<void>;
 }
 
@@ -31,7 +31,7 @@ export function conversationKey(key: ConversationKey): string {
 }
 
 interface StoredHistory {
-    messages: ChatMessage[];
+    messages: StoredChatMessage[];
     updated_at: number;
 }
 
@@ -46,7 +46,7 @@ export class KVHistoryStore implements HistoryStore {
         this.ttlSeconds = ttlSeconds;
     }
 
-    async load(key: ConversationKey): Promise<ChatMessage[]> {
+    async load(key: ConversationKey): Promise<StoredChatMessage[]> {
         const raw = await this.kv.get(conversationKey(key), 'json') as StoredHistory | null;
         if (!raw || !Array.isArray(raw.messages)) {
             return [];
@@ -54,7 +54,7 @@ export class KVHistoryStore implements HistoryStore {
         return raw.messages;
     }
 
-    async save(key: ConversationKey, messages: ChatMessage[]): Promise<void> {
+    async save(key: ConversationKey, messages: StoredChatMessage[]): Promise<void> {
         const trimmed = trimHistory(messages, this.maxMessages);
         const payload: StoredHistory = { messages: trimmed, updated_at: Date.now() };
         await this.kv.put(conversationKey(key), JSON.stringify(payload), {
@@ -72,7 +72,7 @@ export class KVHistoryStore implements HistoryStore {
  * Обрезаем с начала так, чтобы первым остался user-запрос: висящий
  * assistant-ответ без своего вопроса только путает модель.
  */
-export function trimHistory(messages: ChatMessage[], maxMessages: number): ChatMessage[] {
+export function trimHistory(messages: StoredChatMessage[], maxMessages: number): StoredChatMessage[] {
     if (maxMessages <= 0 || messages.length <= maxMessages) {
         return messages;
     }

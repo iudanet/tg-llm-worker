@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import type { ChatMessage } from '../llm/provider';
+import type { StoredChatMessage } from '../llm/provider';
 import { conversationKey, trimHistory } from '../storage/history';
 
-function history(count: number): ChatMessage[] {
-    const messages: ChatMessage[] = [];
+function history(count: number): StoredChatMessage[] {
+    const messages: StoredChatMessage[] = [];
     for (let i = 0; i < count; i += 1) {
         messages.push({ role: i % 2 === 0 ? 'user' : 'assistant', content: `m${i}` });
     }

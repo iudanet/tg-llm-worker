@@ -12,6 +12,8 @@ function configWith(ids: string | undefined): Config {
         whiteList: parseWhiteList(ids), historyMaxMessages: 20,
         historyTtlSeconds: 60, streamIntervalMs: 1000,
         documentThreshold: 4096, useRichMessages: true,
+        visionEnabled: true, visionContextImages: 2,
+        imageTtlSeconds: 3600, imageMaxBytes: 1024 * 1024,
     };
 }
 
@@ -78,21 +80,21 @@ describe('describeUnsupported', () => {
         expect(describeUnsupported({ ...base, text: 'привет' })).toBeNull();
     });
 
-    it('explains that photos are not supported yet', () => {
+    it('no longer rejects photos — they are handled by the vision branch', () => {
         const message = {
             ...base,
             photo: [{ file_id: 'f', file_unique_id: 'u', width: 1, height: 1 }],
         };
-        expect(describeUnsupported(message)).toContain('картинки');
+        expect(describeUnsupported(message)).toBeNull();
     });
 
-    it('answers a photo sent with a caption instead of staying silent', () => {
+    it('no longer rejects a photo sent with a caption', () => {
         const message = {
             ...base,
             caption: 'что тут?',
             photo: [{ file_id: 'f', file_unique_id: 'u', width: 1, height: 1 }],
         };
-        expect(describeUnsupported(message)).not.toBeNull();
+        expect(describeUnsupported(message)).toBeNull();
     });
 
     it('covers documents, voice and stickers', () => {

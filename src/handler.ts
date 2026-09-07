@@ -1,10 +1,18 @@
 import type { Config } from './config';
-import type { ChatMessage, ChatProvider } from './llm/provider';
+import type {
+    ChatMessage,
+    ChatProvider,
+    ImageRefPart,
+    StoredChatMessage,
+} from './llm/provider';
 import type { ConversationKey, HistoryStore } from './storage/history';
+import type { ImageStore } from './vision/store';
 import type { TelegramApi } from './telegram/api';
-import type { TelegramMessage, TelegramUpdate } from './telegram/types';
+import type { TelegramMessage, TelegramPhotoSize, TelegramUpdate } from './telegram/types';
 import { deliverAnswer } from './telegram/deliver';
 import { DraftStreamer } from './telegram/stream';
+import { hydrateForLlm } from './vision/hydrate';
+import { imageKey, pickPhotoSize, toBase64 } from './vision/store';
 
 /**
  * BOT_COMMANDS публикуется в меню Telegram при инициализации воркера.
@@ -42,6 +50,8 @@ export interface HandlerDeps {
     api: TelegramApi;
     provider: ChatProvider;
     history: HistoryStore;
+    /** Хранилище картинок: отдельные ключи, чтобы не раздувать историю. */
+    images: ImageStore;
     config: Config;
 }
 
@@ -62,7 +72,12 @@ export async function handleUpdate(update: TelegramUpdate, deps: HandlerDeps): P
         return;
     }
 
-    // Вложения пока не поддерживаются: молчание в ответ на фото выглядит
+    if (message.photo?.length) {
+        await handlePhoto(message.photo, message, deps);
+        return;
+    }
+
+    // Остальные вложения не поддерживаются: молчание в ответ выглядит
     // как поломка, поэтому явно говорим, чего бот не умеет.
     const unsupported = describeUnsupported(message);
     if (unsupported) {
@@ -90,9 +105,6 @@ export async function handleUpdate(update: TelegramUpdate, deps: HandlerDeps): P
  * Возвращает null, если сообщение обычное текстовое.
  */
 export function describeUnsupported(message: TelegramMessage): string | null {
-    if (message.photo?.length) {
-        return 'Пока не умею читать картинки — распознавание изображений ещё не подключено. Опишите вопрос текстом.';
-    }
     if (message.document) {
         return 'Пока не умею читать файлы. Пришлите содержимое текстом.';
     }
@@ -203,16 +215,121 @@ async function deleteConversation(message: TelegramMessage, deps: HandlerDeps): 
     }
 }
 
+/**
+ * handlePhoto stores the image and asks the model about it.
+ *
+ * Картинка не кладётся в блоб истории: она уходит в свой KV-ключ, а в
+ * истории остаётся ссылка. Иначе каждое последующее сообщение читало и
+ * писало бы мегабайты base64.
+ */
+async function handlePhoto(
+    photo: TelegramPhotoSize[],
+    message: TelegramMessage,
+    deps: HandlerDeps,
+): Promise<void> {
+    const chatId = message.chat.id;
+    const threadId = message.message_thread_id;
+
+    if (!deps.config.visionEnabled) {
+        await deps.api.sendMessage({
+            chat_id: chatId,
+            message_thread_id: threadId,
+            text: 'Обработка картинок отключена в настройках бота.',
+        });
+        return;
+    }
+
+    const limitMb = (deps.config.imageMaxBytes / (1024 * 1024)).toFixed(1);
+    const size = pickPhotoSize(photo, deps.config.imageMaxBytes);
+    if (!size) {
+        await deps.api.sendMessage({
+            chat_id: chatId,
+            message_thread_id: threadId,
+            text: `Картинка слишком большая — лимит ${limitMb} МБ.`,
+        });
+        return;
+    }
+
+    const stored = await storePhoto(size, { chatId, threadId }, deps);
+    if (!stored) {
+        await deps.api.sendMessage({
+            chat_id: chatId,
+            message_thread_id: threadId,
+            text: 'Не удалось загрузить картинку из Telegram. Попробуйте ещё раз.',
+        });
+        return;
+    }
+
+    // Подпись к фото и есть вопрос пользователя; без неё спрашиваем сами.
+    const caption = message.caption?.trim() || 'Что на этом изображении?';
+    await runTurn({
+        role: 'user',
+        content: [{ type: 'text', text: caption }, stored],
+    }, message, deps);
+}
+
+/**
+ * storePhoto downloads one photo variant and keeps it in KV.
+ * Возвращает ссылку для истории или null, если картинку получить не удалось.
+ */
+async function storePhoto(
+    size: TelegramPhotoSize,
+    scope: { chatId: number; threadId?: number },
+    deps: HandlerDeps,
+): Promise<ImageRefPart | null> {
+    const file = await deps.api.getFile(size.file_id);
+    if (!file.ok || !file.result?.file_path) {
+        return null;
+    }
+
+    const buffer = await deps.api.downloadFile(file.result.file_path);
+    if (!buffer) {
+        return null;
+    }
+    // file_size необязателен, поэтому фактический размер проверяем после скачивания.
+    if (buffer.byteLength > deps.config.imageMaxBytes) {
+        console.error(JSON.stringify({
+            msg: 'photo over the limit after download',
+            bytes: buffer.byteLength,
+            limit: deps.config.imageMaxBytes,
+        }));
+        return null;
+    }
+
+    const key = imageKey(scope, size.file_unique_id);
+    await deps.images.write(key, toBase64(buffer));
+    return { type: 'image_ref', key, fileId: size.file_id, mime: 'image/jpeg' };
+}
+
 async function handleChat(text: string, message: TelegramMessage, deps: HandlerDeps): Promise<void> {
+    await runTurn({ role: 'user', content: text }, message, deps);
+}
+
+/**
+ * runTurn drives one exchange: stream the answer, deliver it, persist history.
+ * Общий путь для текста и картинок — различие только в составе сообщения.
+ */
+async function runTurn(
+    userMessage: StoredChatMessage,
+    message: TelegramMessage,
+    deps: HandlerDeps,
+): Promise<void> {
     const chatId = message.chat.id;
     const key: ConversationKey = { chatId, threadId: message.message_thread_id };
     const history = await deps.history.load(key);
 
-    const conversation: ChatMessage[] = [];
+    const stored: StoredChatMessage[] = [...history, userMessage];
+    // Ссылки на картинки разворачиваются в data-URL только здесь: в KV
+    // и дальше по коду они остаются ссылками.
+    const conversation: ChatMessage[] = await hydrateForLlm(stored, {
+        reader: deps.images,
+        refetcher: { refetch: ref => refetchImage(ref, deps) },
+        contextImages: deps.config.visionContextImages,
+        enabled: deps.config.visionEnabled,
+    });
     if (deps.config.systemPrompt) {
-        conversation.push({ role: 'system', content: deps.config.systemPrompt });
+        conversation.unshift({ role: 'system', content: deps.config.systemPrompt });
     }
-    conversation.push(...history, { role: 'user', content: text });
 
     const streamer = new DraftStreamer(deps.api, {
         chatId,
@@ -247,9 +364,24 @@ async function handleChat(text: string, message: TelegramMessage, deps: HandlerD
         useRichMessages: deps.config.useRichMessages,
     });
 
-    await deps.history.save(key, [
-        ...history,
-        { role: 'user', content: text },
-        { role: 'assistant', content: answer },
-    ]);
+    await deps.history.save(key, [...stored, { role: 'assistant', content: answer }]);
+}
+
+/**
+ * refetchImage pulls an image back from Telegram after its KV entry expired.
+ * TTL картинки короче TTL истории, поэтому такой промах — ожидаемый случай.
+ */
+async function refetchImage(ref: ImageRefPart, deps: HandlerDeps): Promise<string | null> {
+    const file = await deps.api.getFile(ref.fileId);
+    if (!file.ok || !file.result?.file_path) {
+        return null;
+    }
+    const buffer = await deps.api.downloadFile(file.result.file_path);
+    if (!buffer) {
+        return null;
+    }
+    const base64 = toBase64(buffer);
+    // Возвращаем в KV, чтобы следующий вопрос по этой картинке не качал её снова.
+    await deps.images.write(ref.key, base64);
+    return base64;
 }

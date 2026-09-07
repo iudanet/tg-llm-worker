@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { Config } from '../config';
-import type { ChatMessage, ChatProvider, StreamCallbacks } from '../llm/provider';
+import type { ChatMessage, ChatProvider, StoredChatMessage, StreamCallbacks } from '../llm/provider';
 import type { ConversationKey, HistoryStore } from '../storage/history';
 import type { TelegramApi } from '../telegram/api';
 import type { SendMessageParams, TelegramUpdate } from '../telegram/types';
+import type { ImageStore } from '../vision/store';
 import { parseWhiteList } from '../config';
 import { BOT_COMMANDS, handleUpdate } from '../handler';
 import { conversationKey } from '../storage/history';
@@ -17,6 +18,8 @@ function config(): Config {
         whiteList: parseWhiteList(String(USER_ID)), historyMaxMessages: 20,
         historyTtlSeconds: 60, streamIntervalMs: 1000,
         documentThreshold: 4096, useRichMessages: true,
+        visionEnabled: true, visionContextImages: 2,
+        imageTtlSeconds: 3600, imageMaxBytes: 1024 * 1024,
     };
 }
 
@@ -28,7 +31,7 @@ class FakeHistory implements HistoryStore {
     readonly cleared: string[] = [];
     constructor(private readonly calls: string[] = []) {}
 
-    async load(): Promise<ChatMessage[]> {
+    async load(): Promise<StoredChatMessage[]> {
         return [];
     }
 
@@ -94,10 +97,22 @@ function commandUpdate(text: string, threadId?: number): TelegramUpdate {
     };
 }
 
+/** Команды картинок не касаются — хранилище должно остаться нетронутым. */
+const images = {
+    async read(): Promise<string | null> {
+        throw new Error('commands must not touch the image store');
+    },
+    async write(): Promise<void> {
+        throw new Error('commands must not touch the image store');
+    },
+} as unknown as ImageStore;
+
 async function run(text: string, threadId?: number, options: { deleteOk?: boolean } = {}) {
     const { api, sent, deleted, calls } = fakeApi(options);
     const history = new FakeHistory(calls);
-    await handleUpdate(commandUpdate(text, threadId), { api, provider, history, config: config() });
+    await handleUpdate(commandUpdate(text, threadId), {
+        api, provider, history, images, config: config(),
+    });
     return { history, sent, deleted, calls };
 }
 

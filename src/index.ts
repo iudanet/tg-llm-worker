@@ -6,6 +6,7 @@ import { OpenAIProvider } from './llm/openai';
 import { indexPage, initWebhook } from './routes';
 import { KVHistoryStore } from './storage/history';
 import { TelegramApi } from './telegram/api';
+import { ImageStore } from './vision/store';
 
 export default {
     async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -87,6 +88,8 @@ async function handleWebhook(
             model: config.model,
         }),
         history: new KVHistoryStore(env.DATABASE, config.historyMaxMessages, config.historyTtlSeconds),
+        // Картинки живут в том же namespace, но своими ключами и с меньшим TTL.
+        images: new ImageStore(env.DATABASE, config.imageTtlSeconds),
         config,
     };
 

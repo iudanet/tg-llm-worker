@@ -18,6 +18,10 @@ export interface Env {
     STREAM_INTERVAL_MS?: string;
     DOCUMENT_THRESHOLD?: string;
     USE_RICH_MESSAGES?: string;
+    VISION_ENABLED?: string;
+    VISION_CONTEXT_IMAGES?: string;
+    IMAGE_TTL_SECONDS?: string;
+    IMAGE_MAX_BYTES?: string;
 }
 
 export interface Config {
@@ -33,15 +37,28 @@ export interface Config {
     streamIntervalMs: number;
     documentThreshold: number;
     useRichMessages: boolean;
+    visionEnabled: boolean;
+    /** Сколько последних картинок разворачивать в запрос к модели. */
+    visionContextImages: number;
+    imageTtlSeconds: number;
+    imageMaxBytes: number;
 }
 
-const DEFAULT_MODEL = 'gpt-4.1-mini';
+const DEFAULT_MODEL = 'gpt-5-mini';
 const DEFAULT_API_BASE = 'https://api.openai.com/v1';
 const DEFAULT_HISTORY_MAX_MESSAGES = 20;
 const DEFAULT_HISTORY_TTL_SECONDS = 60 * 60 * 24 * 7;
 const DEFAULT_STREAM_INTERVAL_MS = 1200;
 // Ответы длиннее порога уходят файлом .md вместо нарезки на сообщения.
 const DEFAULT_DOCUMENT_THRESHOLD = 4096;
+// Картинки живут меньше истории: они тяжёлые, а ссылка на протухшую
+// картинку деградирует в текстовую заглушку без ошибки.
+const DEFAULT_IMAGE_TTL_SECONDS = 60 * 60 * 24;
+// Каждая картинка едет в модель заново в каждом запросе, поэтому в контекст
+// разворачиваем только несколько последних.
+const DEFAULT_VISION_CONTEXT_IMAGES = 2;
+// Telegram сам пережимает фото (обычно 100-300 КБ); лимит отсекает крупное.
+const DEFAULT_IMAGE_MAX_BYTES = 1024 * 1024;
 
 function parseIntOr(value: string | undefined, fallback: number): number {
     if (!value) {
@@ -97,5 +114,9 @@ export function loadConfig(env: Env): Config {
         streamIntervalMs: parseIntOr(env.STREAM_INTERVAL_MS, DEFAULT_STREAM_INTERVAL_MS),
         documentThreshold: parseIntOr(env.DOCUMENT_THRESHOLD, DEFAULT_DOCUMENT_THRESHOLD),
         useRichMessages: (env.USE_RICH_MESSAGES ?? 'true').toLowerCase() !== 'false',
+        visionEnabled: (env.VISION_ENABLED ?? 'true').toLowerCase() !== 'false',
+        visionContextImages: parseIntOr(env.VISION_CONTEXT_IMAGES, DEFAULT_VISION_CONTEXT_IMAGES),
+        imageTtlSeconds: parseIntOr(env.IMAGE_TTL_SECONDS, DEFAULT_IMAGE_TTL_SECONDS),
+        imageMaxBytes: parseIntOr(env.IMAGE_MAX_BYTES, DEFAULT_IMAGE_MAX_BYTES),
     };
 }

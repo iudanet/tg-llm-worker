@@ -13,11 +13,42 @@ export interface ImagePart {
     url: string;
 }
 
+/**
+ * ImageRefPart points at an image kept outside the conversation blob.
+ *
+ * Хранится только в KV и никогда не уходит провайдеру: картинки лежат в
+ * отдельных ключах, чтобы блоб истории не раздувался, а перед запросом
+ * ссылка разворачивается в ImagePart (см. vision/hydrate).
+ */
+export interface ImageRefPart {
+    type: 'image_ref';
+    /** Ключ картинки в KV */
+    key: string;
+    /** file_id для повторного скачивания, если ключ уже протух */
+    fileId: string;
+    mime: string;
+}
+
+/** Части, которые понимает провайдер. */
 export type ContentPart = TextPart | ImagePart;
 
+/** Части, которые могут лежать в истории. */
+export type StoredContentPart = TextPart | ImageRefPart;
+
+/** Сообщение, готовое к отправке провайдеру. */
 export interface ChatMessage {
     role: 'system' | 'user' | 'assistant';
     content: string | ContentPart[];
+}
+
+/**
+ * StoredChatMessage is the on-disk shape kept in KV.
+ * Отличается от ChatMessage тем, что картинка представлена ссылкой:
+ * тип не даст случайно отправить image_ref провайдеру.
+ */
+export interface StoredChatMessage {
+    role: 'system' | 'user' | 'assistant';
+    content: string | StoredContentPart[];
 }
 
 export interface StreamCallbacks {

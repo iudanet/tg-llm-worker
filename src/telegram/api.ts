@@ -6,6 +6,7 @@ import type {
     SendMessageParams,
     SendRichMessageDraftParams,
     SendRichMessageParams,
+    TelegramFile,
     TelegramMessage,
 } from './types';
 
@@ -79,6 +80,31 @@ export class TelegramApi {
 
     deleteMyCommands(scope?: { type: string }): Promise<ApiResponse<boolean>> {
         return this.call<boolean>('deleteMyCommands', scope ? { scope } : {});
+    }
+
+    /**
+     * getFile resolves a file_id into a downloadable path.
+     * Ограничение Bot API — файлы до 20 МБ.
+     */
+    getFile(fileId: string): Promise<ApiResponse<TelegramFile>> {
+        return this.call<TelegramFile>('getFile', { file_id: fileId });
+    }
+
+    /**
+     * downloadFile fetches file content by the path returned from getFile.
+     * Возвращает null, если файл недоступен: протухший file_path — штатная
+     * ситуация, диалог из-за неё ломаться не должен.
+     */
+    async downloadFile(filePath: string): Promise<ArrayBuffer | null> {
+        const response = await fetch(`${API_ROOT}/file/bot${this.token}/${filePath}`);
+        if (!response.ok) {
+            console.error(JSON.stringify({
+                msg: 'file download failed',
+                status: response.status,
+            }));
+            return null;
+        }
+        return response.arrayBuffer();
     }
 
     /**
