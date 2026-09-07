@@ -11,6 +11,7 @@ import type { TelegramApi } from './telegram/api';
 import type { TelegramMessage, TelegramPhotoSize, TelegramUpdate } from './telegram/types';
 import { deliverAnswer } from './telegram/deliver';
 import { DraftStreamer } from './telegram/stream';
+import { topicNameFrom } from './telegram/title';
 import { hydrateForLlm } from './vision/hydrate';
 import { imageKey, pickPhotoSize, toBase64 } from './vision/store';
 
@@ -318,6 +319,12 @@ async function runTurn(
     const key: ConversationKey = { chatId, threadId: message.message_thread_id };
     const history = await deps.history.load(key);
 
+    // Пустая история = первое сообщение в топике: только здесь ставим имя,
+    // чтобы не перебивать заголовок, заданный пользователем вручную.
+    if (history.length === 0) {
+        await nameTopic(message, deps);
+    }
+
     const stored: StoredChatMessage[] = [...history, userMessage];
     // Ссылки на картинки разворачиваются в data-URL только здесь: в KV
     // и дальше по коду они остаются ссылками.
@@ -365,6 +372,36 @@ async function runTurn(
     });
 
     await deps.history.save(key, [...stored, { role: 'assistant', content: answer }]);
+}
+
+/**
+ * nameTopic titles a fresh topic after the user's first message.
+ *
+ * Клиент Telegram называет новый топик «Новый чат» — осмысленный заголовок
+ * ставит бот. Неудача переименования сознательно игнорируется: имя топика
+ * косметика, из-за него ответ пользователю ломаться не должен.
+ */
+async function nameTopic(message: TelegramMessage, deps: HandlerDeps): Promise<void> {
+    const threadId = message.message_thread_id;
+    if (threadId === undefined) {
+        // Вне топиков переименовывать нечего.
+        return;
+    }
+    const source = message.text ?? message.caption ?? '';
+    const name = topicNameFrom(source);
+    if (!name) {
+        return;
+    }
+
+    const result = await deps.api.editForumTopic(message.chat.id, threadId, name);
+    if (!result.ok) {
+        console.error(JSON.stringify({
+            msg: 'editForumTopic failed',
+            chat_id: message.chat.id,
+            message_thread_id: threadId,
+            description: result.description,
+        }));
+    }
 }
 
 /**

@@ -57,14 +57,22 @@ class FakeImages {
 interface ApiOptions {
     getFileOk?: boolean;
     downloadBytes?: number | null;
+    renameOk?: boolean;
 }
 
 function fakeApi(options: ApiOptions = {}) {
     const sent: SendMessageParams[] = [];
+    const renamed: string[] = [];
     const api = {
         async sendMessage(params: SendMessageParams) {
             sent.push(params);
             return { ok: true };
+        },
+        async editForumTopic(_chatId: number, _threadId: number, name: string) {
+            renamed.push(name);
+            return options.renameOk === false
+                ? { ok: false, error_code: 400, description: 'Bad Request' }
+                : { ok: true, result: true };
         },
         async sendMessageDraft() {
             return { ok: true, result: true };
@@ -81,7 +89,7 @@ function fakeApi(options: ApiOptions = {}) {
             return new ArrayBuffer(options.downloadBytes ?? 16);
         },
     } as unknown as TelegramApi;
-    return { api, sent };
+    return { api, sent, renamed };
 }
 
 /** Провайдер, запоминающий то, что реально ушло в модель. */
@@ -126,7 +134,7 @@ async function run(update: TelegramUpdate, options: {
     cfg?: Partial<Config>;
     preset?: StoredChatMessage[];
 } = {}) {
-    const { api, sent } = fakeApi(options.api);
+    const { api, sent, renamed } = fakeApi(options.api);
     const { provider, seen } = fakeProvider();
     const history = new FakeHistory(options.preset ?? []);
     const images = new FakeImages();
@@ -137,8 +145,60 @@ async function run(update: TelegramUpdate, options: {
         images: images as unknown as ImageStore,
         config: config(options.cfg),
     });
-    return { sent, seen, history, images };
+    return { sent, seen, history, images, renamed };
 }
+
+/**
+ * threadId передаётся явно: значение по умолчанию в JS срабатывает и на
+ * явный undefined, из-за чего «вне топика» не получилось бы выразить.
+ */
+function textUpdate(text: string, threadId: number | null = THREAD_ID): TelegramUpdate {
+    return {
+        update_id: 3,
+        message: {
+            message_id: 3,
+            ...(threadId === null ? {} : { message_thread_id: threadId }),
+            from: { id: USER_ID, is_bot: false, first_name: 'U' },
+            chat: { id: USER_ID, type: 'private' },
+            date: 0,
+            text,
+        },
+    };
+}
+
+describe('topic naming', () => {
+    it('names a fresh topic after the first message', async () => {
+        // Клиент называет новый топик «Новый чат» — имя ставит бот.
+        const { renamed } = await run(textUpdate('Как работает KV в Workers?'));
+        expect(renamed).toEqual(['Как работает KV в Workers?']);
+    });
+
+    it('does not rename once the conversation has history', async () => {
+        const { renamed } = await run(textUpdate('второй вопрос'), {
+            preset: [{ role: 'user', content: 'первый вопрос' }],
+        });
+        expect(renamed).toEqual([]);
+    });
+
+    it('names the topic from a photo caption too', async () => {
+        const { renamed } = await run(photoUpdate('что на схеме?'));
+        expect(renamed).toEqual(['что на схеме?']);
+    });
+
+    it('skips renaming outside topics', async () => {
+        const { renamed } = await run(textUpdate('привет', null));
+        expect(renamed).toEqual([]);
+    });
+
+    it('still answers when renaming fails', async () => {
+        // Имя топика косметика: отказ метода не должен ломать ответ.
+        const { seen, renamed } = await run(textUpdate('вопрос'), {
+            api: { renameOk: false },
+        });
+        expect(renamed).toEqual(['вопрос']);
+        expect(seen).toHaveLength(1);
+    });
+});
 
 describe('handleUpdate with a photo', () => {
     it('sends the image to the model as a data URL', async () => {

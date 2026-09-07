@@ -108,6 +108,19 @@ export class TelegramApi {
     }
 
     /**
+     * editForumTopic renames a topic.
+     * Клиент Telegram присваивает новому топику имя «Новый чат», поэтому
+     * осмысленный заголовок ставит бот — по первому сообщению пользователя.
+     */
+    editForumTopic(chatId: number, messageThreadId: number, name: string): Promise<ApiResponse<boolean>> {
+        return this.call<boolean>('editForumTopic', {
+            chat_id: chatId,
+            message_thread_id: messageThreadId,
+            name,
+        });
+    }
+
+    /**
      * deleteForumTopic removes a topic together with all of its messages.
      * Работает и в приватном чате: Bot API не сообщает боту об удалении треда
      * пользователем, поэтому удаление инициирует сам бот по команде.
