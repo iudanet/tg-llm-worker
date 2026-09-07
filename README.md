@@ -268,8 +268,9 @@ Bot API не присылает боту событий об удалении: �
 
 ```bash
 npm test              # vitest
+npm run lint          # oxlint
 npm run typecheck     # tsc --noEmit
-npm run check         # typecheck + тесты: гейт перед деплоем
+npm run check         # lint + typecheck + тесты: гейт перед деплоем
 npm run dev           # локальный запуск
 npm run deploy        # check, затем wrangler deploy
 npm run deploy:noproxy # то же в обход прокси

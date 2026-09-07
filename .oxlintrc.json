@@ -1,0 +1,35 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error"
+  },
+  "env": {
+    "es2022": true,
+    "worker": true
+  },
+  "rules": {
+    "eqeqeq": "error",
+    "no-var": "error",
+    "prefer-const": "error",
+    "no-throw-literal": "error",
+
+    // Логи структурированные, console.error — штатный вывод воркера.
+    "no-console": "off",
+    // await в цикле здесь намеренный: чтение SSE-потока, скачивание картинок
+    // по одной, отправка чанков по порядку. Параллелить нельзя.
+    "no-await-in-loop": "off",
+    // __APP_VERSION__ и __APP_COMMIT__ — соглашение бандлеров для define.
+    "no-underscore-dangle": "off"
+  },
+  "overrides": [
+    {
+      "files": ["src/tests/**/*.ts"],
+      "rules": {
+        "no-empty-function": "off",
+        "no-shadow": "off"
+      }
+    }
+  ],
+  "ignorePatterns": ["dist/", "node_modules/", ".wrangler/"]
+}

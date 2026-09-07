@@ -14,15 +14,17 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
+    "lint": "oxlint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "check": "npm run typecheck && npm run test",
+    "check": "npm run lint && npm run typecheck && npm run test",
     "deploy": "npm run check && wrangler deploy",
     "deploy:noproxy": "env -u https_proxy -u HTTPS_PROXY -u http_proxy -u HTTP_PROXY npm run deploy",
     "deploy:force": "wrangler deploy"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260904.1",
+    "oxlint": "^1.82.0",
     "typescript": "^7.0.2",
     "vitest": "^5.0.0",
     "wrangler": "^4.129.0"

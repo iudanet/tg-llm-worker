@@ -93,7 +93,8 @@ export function appendPending(
     incoming: PendingMessage,
 ): PendingMessage[] {
     const withoutDuplicate = messages.filter(entry => entry.id !== incoming.id);
-    return [...withoutDuplicate, incoming].sort((a, b) => a.id - b.id);
+    // toSorted вместо sort: не мутирует массив, из которого собран результат.
+    return [...withoutDuplicate, incoming].toSorted((a, b) => a.id - b.id);
 }
 
 /**

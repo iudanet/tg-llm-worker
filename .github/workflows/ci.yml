@@ -19,8 +19,15 @@ jobs:
 
       - run: npm ci
 
-      # Тот же гейт, что и перед локальным деплоем.
-      - run: npm run check
+      # Разбито на шаги, чтобы в логе было видно, что именно упало.
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Tests
+        run: npm test
 
       # Сборка не требует ни ключей, ни сети — проверяем, что бандл собирается.
       - name: Build bundle
