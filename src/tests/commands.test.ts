@@ -20,9 +20,13 @@ function config(): Config {
     };
 }
 
-/** Мок истории: запоминает, какие ключи очищали. */
+/**
+ * Мок истории: запоминает, какие ключи очищали.
+ * calls — общий с моком API журнал вызовов, чтобы проверять их порядок.
+ */
 class FakeHistory implements HistoryStore {
     readonly cleared: string[] = [];
+    constructor(private readonly calls: string[] = []) {}
 
     async load(): Promise<ChatMessage[]> {
         return [];
@@ -31,20 +35,42 @@ class FakeHistory implements HistoryStore {
     async save(): Promise<void> {}
 
     async clear(key: ConversationKey): Promise<void> {
+        this.calls.push('history.clear');
         this.cleared.push(conversationKey(key));
     }
 }
 
-/** Мок API: собирает отправленный текст, остальные методы не нужны командам. */
-function fakeApi(): { api: TelegramApi; sent: SendMessageParams[] } {
+/**
+ * Мок API: собирает отправленный текст и вызовы удаления треда.
+ * calls хранит общий порядок действий — им проверяется, что ответ
+ * пользователю уходит до удаления треда, а не после.
+ */
+interface FakeApi {
+    api: TelegramApi;
+    sent: SendMessageParams[];
+    deleted: Array<{ chatId: number; threadId: number }>;
+    calls: string[];
+}
+
+function fakeApi(options: { deleteOk?: boolean } = {}): FakeApi {
     const sent: SendMessageParams[] = [];
+    const deleted: Array<{ chatId: number; threadId: number }> = [];
+    const calls: string[] = [];
     const api = {
         async sendMessage(params: SendMessageParams) {
+            calls.push('sendMessage');
             sent.push(params);
             return { ok: true };
         },
+        async deleteForumTopic(chatId: number, threadId: number) {
+            calls.push('deleteForumTopic');
+            deleted.push({ chatId, threadId });
+            return options.deleteOk === false
+                ? { ok: false, error_code: 400, description: 'Bad Request: TOPIC_ID_INVALID' }
+                : { ok: true, result: true };
+        },
     } as unknown as TelegramApi;
-    return { api, sent };
+    return { api, sent, deleted, calls };
 }
 
 const provider: ChatProvider = {
@@ -68,11 +94,11 @@ function commandUpdate(text: string, threadId?: number): TelegramUpdate {
     };
 }
 
-async function run(text: string, threadId?: number) {
-    const history = new FakeHistory();
-    const { api, sent } = fakeApi();
+async function run(text: string, threadId?: number, options: { deleteOk?: boolean } = {}) {
+    const { api, sent, deleted, calls } = fakeApi(options);
+    const history = new FakeHistory(calls);
     await handleUpdate(commandUpdate(text, threadId), { api, provider, history, config: config() });
-    return { history, sent };
+    return { history, sent, deleted, calls };
 }
 
 describe('BOT_COMMANDS', () => {
@@ -81,7 +107,7 @@ describe('BOT_COMMANDS', () => {
     });
 
     it('publishes every command the handler answers', () => {
-        expect(BOT_COMMANDS.map(c => c.command)).toEqual(['start', 'new', 'help']);
+        expect(BOT_COMMANDS.map(c => c.command)).toEqual(['start', 'new', 'delete', 'help']);
     });
 
     it('gives every command a description for the Telegram menu', () => {
@@ -128,10 +154,57 @@ describe('/new', () => {
     });
 });
 
+describe('/delete', () => {
+    it('clears the history and deletes the topic', async () => {
+        const { history, deleted } = await run('/delete', 7);
+        expect(history.cleared).toEqual([`chat:${USER_ID}:7`]);
+        expect(deleted).toEqual([{ chatId: USER_ID, threadId: 7 }]);
+    });
+
+    it('clears the history before deleting the topic', async () => {
+        // Обратный порядок оставил бы историю при исчезнувшем треде.
+        const { calls } = await run('/delete', 7);
+        expect(calls.indexOf('history.clear')).toBeLessThan(calls.indexOf('deleteForumTopic'));
+    });
+
+    it('answers before deleting the topic — a deleted topic takes no messages', async () => {
+        const { calls } = await run('/delete', 7);
+        expect(calls.indexOf('sendMessage')).toBeLessThan(calls.indexOf('deleteForumTopic'));
+    });
+
+    it('keeps the history cleared even when deleting the topic fails', async () => {
+        const { history, deleted } = await run('/delete', 7, { deleteOk: false });
+        expect(deleted).toHaveLength(1);
+        expect(history.cleared).toEqual([`chat:${USER_ID}:7`]);
+    });
+
+    it('tells the user to remove the topic by hand when deletion fails', async () => {
+        const { sent } = await run('/delete', 7, { deleteOk: false });
+        expect(sent.at(-1)?.text).toContain('вручную');
+    });
+
+    it('outside a topic behaves like /new and deletes nothing', async () => {
+        const { history, deleted, sent } = await run('/delete');
+        expect(history.cleared).toEqual([`chat:${USER_ID}`]);
+        expect(deleted).toEqual([]);
+        expect(sent).toHaveLength(1);
+    });
+
+    it('accepts the /delete@botname form', async () => {
+        const { deleted } = await run('/delete@mybot', 7);
+        expect(deleted).toEqual([{ chatId: USER_ID, threadId: 7 }]);
+    });
+});
+
 describe('/help', () => {
     it('lists /start among the commands', async () => {
         const { sent } = await run('/help');
         expect(sent[0]?.text).toContain('/start');
+    });
+
+    it('lists /delete among the commands', async () => {
+        const { sent } = await run('/help');
+        expect(sent[0]?.text).toContain('/delete');
     });
 
     it('leaves the history untouched', async () => {
