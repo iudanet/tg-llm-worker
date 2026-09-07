@@ -16,6 +16,7 @@ function configWith(ids: string | undefined): Config {
         imageTtlSeconds: 3600, imageMaxBytes: 1024 * 1024,
         // Окно выключено: тесты проверяют поведение, а не ожидание.
         batchWindowMs: 0, batchMaxWaitMs: 8000,
+        transcribeEnabled: true, transcribeModel: 'stt', audioMaxBytes: 20 * 1024 * 1024,
     };
 }
 
@@ -99,9 +100,14 @@ describe('describeUnsupported', () => {
         expect(describeUnsupported(message)).toBeNull();
     });
 
-    it('covers documents, voice and stickers', () => {
+    it('no longer rejects voice — it goes to transcription', () => {
+        expect(describeUnsupported({ ...base, voice: { file_id: 'f' } })).toBeNull();
+        expect(describeUnsupported({ ...base, audio: { file_id: 'f' } })).toBeNull();
+    });
+
+    it('covers documents, video and stickers', () => {
         expect(describeUnsupported({ ...base, document: { file_id: 'f' } })).toContain('файлы');
-        expect(describeUnsupported({ ...base, voice: { file_id: 'f' } })).toContain('голос');
+        expect(describeUnsupported({ ...base, video: { file_id: 'f' } })).toContain('видео');
         expect(describeUnsupported({ ...base, sticker: { file_id: 'f' } })).toContain('стикер');
     });
 });

@@ -25,6 +25,7 @@ function config(overrides: Partial<Config> = {}): Config {
         imageTtlSeconds: 3600, imageMaxBytes: 1024 * 1024,
         // По умолчанию окно выключено: батчинг проверяется отдельными тестами.
         batchWindowMs: 0, batchMaxWaitMs: 8000,
+        transcribeEnabled: true, transcribeModel: 'stt', audioMaxBytes: 20 * 1024 * 1024,
         ...overrides,
     };
 }

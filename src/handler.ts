@@ -9,10 +9,16 @@ import type { BatchBuffer, PendingMessage } from './batch/buffer';
 import type { ConversationKey, HistoryStore } from './storage/history';
 import type { ImageStore } from './vision/store';
 import type { TelegramApi } from './telegram/api';
-import type { TelegramMessage, TelegramPhotoSize, TelegramUpdate } from './telegram/types';
+import type {
+    TelegramMessage,
+    TelegramPhotoSize,
+    TelegramUpdate,
+    TelegramVoice,
+} from './telegram/types';
 import { deliverAnswer } from './telegram/deliver';
 import { DraftStreamer } from './telegram/stream';
 import { topicNameFrom } from './telegram/title';
+import { audioFileName, transcribe, TranscribeError } from './audio/transcribe';
 import { isLastInBatch, mergeBatch, shouldWaitLonger } from './batch/buffer';
 import { hydrateForLlm } from './vision/hydrate';
 import { imageKey, pickPhotoSize, toBase64 } from './vision/store';
@@ -86,6 +92,12 @@ export async function handleUpdate(update: TelegramUpdate, deps: HandlerDeps): P
         return;
     }
 
+    const voice = message.voice ?? message.audio;
+    if (voice) {
+        await handleVoice(voice, message, deps);
+        return;
+    }
+
     // Остальные вложения не поддерживаются: молчание в ответ выглядит
     // как поломка, поэтому явно говорим, чего бот не умеет.
     const unsupported = describeUnsupported(message);
@@ -116,9 +128,6 @@ export async function handleUpdate(update: TelegramUpdate, deps: HandlerDeps): P
 export function describeUnsupported(message: TelegramMessage): string | null {
     if (message.document) {
         return 'Пока не умею читать файлы. Пришлите содержимое текстом.';
-    }
-    if (message.voice || message.audio) {
-        return 'Пока не умею распознавать голос и аудио. Напишите текстом.';
     }
     if (message.video) {
         return 'Пока не умею смотреть видео.';
@@ -275,6 +284,110 @@ async function handlePhoto(
     await enqueue(message, deps, caption
         ? [{ type: 'text', text: caption }, stored]
         : [stored]);
+}
+
+/**
+ * handleVoice transcribes a voice note and answers the question in it.
+ *
+ * Расшифровка отправляется пользователю отдельным сообщением: распознавание
+ * ошибается, и без показанного текста непонятно, на что именно ответил бот.
+ * В историю попадает уже текст, поэтому дальше можно уточнять вопросами.
+ */
+async function handleVoice(
+    voice: TelegramVoice,
+    message: TelegramMessage,
+    deps: HandlerDeps,
+): Promise<void> {
+    const chatId = message.chat.id;
+    const threadId = message.message_thread_id;
+
+    if (!deps.config.transcribeEnabled) {
+        await deps.api.sendMessage({
+            chat_id: chatId,
+            message_thread_id: threadId,
+            text: 'Распознавание голоса отключено в настройках бота.',
+        });
+        return;
+    }
+    if (!deps.config.apiKey) {
+        await deps.api.sendMessage({
+            chat_id: chatId,
+            message_thread_id: threadId,
+            text: 'Распознавание недоступно: не настроен ключ API.',
+        });
+        return;
+    }
+
+    // Размер известен заранее — большой файл отклоняем без скачивания.
+    if (voice.file_size !== undefined && voice.file_size > deps.config.audioMaxBytes) {
+        await deps.api.sendMessage({
+            chat_id: chatId,
+            message_thread_id: threadId,
+            text: 'Запись слишком большая для распознавания.',
+        });
+        return;
+    }
+
+    const file = await deps.api.getFile(voice.file_id);
+    if (!file.ok || !file.result?.file_path) {
+        await deps.api.sendMessage({
+            chat_id: chatId,
+            message_thread_id: threadId,
+            text: 'Не удалось получить запись из Telegram. Попробуйте ещё раз.',
+        });
+        return;
+    }
+
+    const audio = await deps.api.downloadFile(file.result.file_path);
+    if (!audio) {
+        await deps.api.sendMessage({
+            chat_id: chatId,
+            message_thread_id: threadId,
+            text: 'Не удалось скачать запись. Попробуйте ещё раз.',
+        });
+        return;
+    }
+
+    let text: string;
+    try {
+        const result = await transcribe(
+            audio,
+            audioFileName(voice, file.result.file_path),
+            voice.mime_type,
+            {
+                apiKey: deps.config.apiKey,
+                apiBase: deps.config.apiBase,
+                model: deps.config.transcribeModel,
+            },
+        );
+        text = result.text;
+    } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        console.error(JSON.stringify({
+            msg: 'transcription failed',
+            chat_id: chatId,
+            mime: voice.mime_type,
+            duration: voice.duration,
+            error: detail,
+        }));
+        await deps.api.sendMessage({
+            chat_id: chatId,
+            message_thread_id: threadId,
+            text: error instanceof TranscribeError
+                ? error.userMessage
+                : 'Не удалось распознать запись. Попробуйте ещё раз.',
+        });
+        return;
+    }
+
+    // Показываем расшифровку до ответа: видно, что именно бот расслышал.
+    await deps.api.sendMessage({
+        chat_id: chatId,
+        message_thread_id: threadId,
+        text: `🎙 ${text}`,
+    });
+
+    await enqueue(message, deps, text);
 }
 
 /**

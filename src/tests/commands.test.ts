@@ -23,6 +23,7 @@ function config(): Config {
         imageTtlSeconds: 3600, imageMaxBytes: 1024 * 1024,
         // Окно выключено: тесты проверяют поведение, а не ожидание.
         batchWindowMs: 0, batchMaxWaitMs: 8000,
+        transcribeEnabled: true, transcribeModel: 'stt', audioMaxBytes: 20 * 1024 * 1024,
     };
 }
 

@@ -33,6 +33,19 @@ export interface TelegramForwardOrigin {
     author_signature?: string;
 }
 
+/**
+ * Voice note or audio file. Telegram отдаёт голосовые в OGG/Opus,
+ * поэтому mime_type пригодится при отправке на распознавание.
+ */
+export interface TelegramVoice {
+    file_id: string;
+    file_unique_id?: string;
+    duration?: number;
+    mime_type?: string;
+    file_size?: number;
+    file_name?: string;
+}
+
 export interface TelegramMessage {
     message_id: number;
     message_thread_id?: number;
@@ -49,8 +62,8 @@ export interface TelegramMessage {
     entities?: unknown[];
     photo?: TelegramPhotoSize[];
     document?: { file_id: string; file_name?: string; mime_type?: string };
-    voice?: { file_id: string };
-    audio?: { file_id: string };
+    voice?: TelegramVoice;
+    audio?: TelegramVoice;
     video?: { file_id: string };
     sticker?: { file_id: string };
 }
