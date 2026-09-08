@@ -5,6 +5,13 @@
 export const TOPIC_NAME_LIMIT = 60;
 
 /**
+ * Предел разбираемого текста. Telegram допускает 4096 символов в сообщении,
+ * но склейка серии даёт больше, а разбор идёт регулярками по данным
+ * пользователя — на CPU-лимите бесплатного плана (10 мс) это важно.
+ */
+const MAX_SOURCE_LENGTH = 4096;
+
+/**
  * topicNameFrom builds a topic title out of the user's first message.
  *
  * Клиент Telegram называет новый топик «Новый чат», поэтому осмысленное имя
@@ -13,12 +20,15 @@ export const TOPIC_NAME_LIMIT = 60;
  * Возвращает null, если пригодного текста не осталось.
  */
 export function topicNameFrom(text: string): string | null {
-    // Команда в заголовке выглядит как мусор: «/new что дальше» → «что дальше».
-    const normalized = text
-        .replace(/\s+/g, ' ')
-        .trim()
-        .replace(/^\/\S*\s*/, '')
-        .trim();
+    // Текст ограничиваем до разбора: дальше идут регулярки, а вход
+    // приходит от пользователя. Лимит с запасом — имя всё равно короче.
+    const source = text.slice(0, MAX_SOURCE_LENGTH);
+
+    // Пробелы сворачиваются первой заменой, поэтому второй регулярке
+    // остаётся только команда: без \s* в конце она линейна по вводу
+    // (CodeQL js/polynomial-redos на прежнем /^\/\S*\s*/).
+    const collapsed = source.replace(/\s+/g, ' ').trim();
+    const normalized = collapsed.replace(/^\/\S*/, '').trim();
 
     if (normalized === '') {
         return null;
