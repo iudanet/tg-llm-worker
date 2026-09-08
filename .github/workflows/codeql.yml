@@ -1,0 +1,36 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+  schedule:
+    # Раз в неделю: базы правил CodeQL обновляются, и код, чистый сегодня,
+    # может получить находку завтра без единого коммита.
+    - cron: '31 4 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze TypeScript
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # CodeQL использует собственный извлекатель для javascript-typescript
+      # и не зависит от версии TypeScript в package.json — в отличие от
+      # typescript-eslint, который на TS 7 поставить не удалось.
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          queries: security-extended
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@v3

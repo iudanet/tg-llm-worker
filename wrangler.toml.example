@@ -77,3 +77,8 @@ AUDIO_MAX_BYTES = "20971520"
 #   npx wrangler secret put TELEGRAM_BOT_TOKEN
 #   npx wrangler secret put TELEGRAM_WEBHOOK_SECRET
 #   npx wrangler secret put OPENAI_API_KEY
+#
+# TELEGRAM_WEBHOOK_SECRET обязателен — без него воркер не стартует: иначе
+# webhook принимал бы апдейты от кого угодно, а whitelist проверяет from.id
+# из того же тела запроса. Генерация (base64 не подходит, Telegram принимает
+# только A-Za-z0-9_-):  openssl rand -hex 32

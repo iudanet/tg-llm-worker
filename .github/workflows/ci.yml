@@ -5,14 +5,24 @@ on:
     branches: ['**']
   pull_request:
 
+# Минимально необходимые права: сборка и тесты только читают репозиторий.
+permissions:
+  contents: read
+
+# Новый push в ту же ветку отменяет предыдущий прогон.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
-    name: Typecheck and tests
+    name: Lint, typecheck, tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # Actions запинены по SHA: подвижный тег можно перевести на чужой код.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
           cache: npm
@@ -29,6 +39,40 @@ jobs:
       - name: Tests
         run: npm test
 
-      # Сборка не требует ни ключей, ни сети — проверяем, что бандл собирается.
+      # wrangler.toml в .gitignore, а без конфига wrangler не находит entry
+      # point и принимает проект за статический сайт. Шаблон даёт валидный
+      # конфиг: сборка не требует ни ключей, ни сети.
       - name: Build bundle
-        run: npx wrangler deploy --dry-run --outdir dist
+        run: |
+          cp wrangler.toml.example wrangler.toml
+          npx wrangler deploy --dry-run --outdir dist
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # gitleaks сканирует историю — нужен полный клон.
+          fetch-depth: 0
+
+      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      # Уязвимости в зависимостях. Только high и выше: воркер не тянет
+      # рантайм-зависимостей, всё остальное — инструменты разработки.
+      - run: npm audit --audit-level=high

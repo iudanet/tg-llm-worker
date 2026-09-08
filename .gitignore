@@ -1,12 +1,21 @@
 node_modules/
 .wrangler/
 dist/
-.dev.vars
 *.log
 
-# Локальный конфиг: содержит id вашего KV и список допущенных user id.
+# Локальные конфиги: содержат id вашего KV и список допущенных user id.
 # Шаблон — wrangler.toml.example.
 wrangler.toml
+wrangler.json
+wrangler.jsonc
+wrangler.*.toml
+wrangler.*.json
+
+# Секреты для локального запуска.
+.dev.vars
+.dev.vars.*
+.env
+.env.*
 
 # скриншоты и присланные картинки
 photo_*.jpg

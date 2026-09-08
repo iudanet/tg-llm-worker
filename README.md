@@ -58,8 +58,19 @@ npx wrangler kv namespace create DATABASE
 
 ```bash
 npx wrangler secret put TELEGRAM_BOT_TOKEN
-npx wrangler secret put TELEGRAM_WEBHOOK_SECRET   # любая случайная строка
+npx wrangler secret put TELEGRAM_WEBHOOK_SECRET
 npx wrangler secret put OPENAI_API_KEY
+```
+
+`TELEGRAM_WEBHOOK_SECRET` **обязателен**: без него воркер не стартует. Причина
+не формальная — без проверки подписи `POST /webhook` принимал бы апдейты от
+кого угодно, а whitelist проверяет `from.id` из того же тела запроса, то есть
+перестал бы что-либо защищать.
+
+Сгенерировать (base64 не подходит: Telegram принимает только `A-Za-z0-9_-`):
+
+```bash
+openssl rand -hex 32
 ```
 
 ### 4. Whitelist
@@ -266,6 +277,14 @@ Bot API не присылает боту событий об удалении: �
 
 ## Разработка
 
+Перед первым коммитом поставьте хуки — они не дадут утечь секретам,
+реальным user id, локальным конфигам и бинарникам:
+
+```bash
+pre-commit install
+pre-commit run --all-files   # разовая проверка всего репозитория
+```
+
 ```bash
 npm test              # vitest
 npm run lint          # oxlint
@@ -305,6 +324,37 @@ npm run deploy:force  # выложить без проверок (аварийн
 Текстовый диалог со стримингом, приём картинок, распознавание голосовых,
 склейка серии сообщений. Не сделано: генерация изображений, файлы в контекст,
 второй провайдер, вызов внешних API (скилы).
+
+## Безопасность
+
+Модель угроз, устройство защиты и порядок действий при утечке — в
+[SECURITY.md](SECURITY.md). Коротко о том, что стоит на страже:
+
+| Слой | Что делает |
+|---|---|
+| `pre-commit` + `gitleaks` | блокирует токены, реальные user id, KV id, `wrangler.toml`, `.dev.vars`, бинарники |
+| CI | линтер, типы, тесты, сборка, сканер секретов по всей истории, `npm audit` |
+| Release | проверяет артефакты на секреты до публикации |
+| CodeQL | статический анализ по расписанию и на PR |
+| Dependabot | обновления npm и GitHub Actions |
+
+Actions запинены по SHA: подвижный тег можно перевести на чужой код, а у
+релизной джобы есть право записи.
+
+### Настройки репозитория на GitHub
+
+CI работает без дополнительных секретов — используется встроенный
+`GITHUB_TOKEN`. Но включить стоит (Settings → Code security):
+
+- **Secret scanning** и **Push protection** — серверный дублёр `gitleaks`:
+  сработает даже если хук обошли через `--no-verify`;
+- **Dependabot alerts** и **security updates**;
+- **Private vulnerability reporting** — чтобы об уязвимостях сообщали
+  приватно, а не публичным issue.
+
+Settings → Actions → General: «Workflow permissions» → **Read repository
+contents**, снять «Allow GitHub Actions to create and approve pull requests».
+Релизный workflow запрашивает `contents: write` сам, на уровне джобы.
 
 ## Лицензия
 

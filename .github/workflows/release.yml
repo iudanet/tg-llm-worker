@@ -17,9 +17,11 @@ jobs:
     name: Build and publish release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # Actions запинены по SHA: у этой джобы contents: write, и подмена
+      # подвижного тега дала бы чужому коду право писать в релизы.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
           cache: npm
@@ -40,6 +42,9 @@ jobs:
 
       - name: Build worker bundle
         run: |
+          # wrangler.toml в .gitignore, а без конфига wrangler не находит
+          # entry point и принимает проект за статический сайт.
+          cp wrangler.toml.example wrangler.toml
           # Версия и коммит вкомпилируются в бандл: в Workers нет доступа
           # к package.json в рантайме.
           npx wrangler deploy --dry-run --outdir dist \
@@ -68,45 +73,23 @@ jobs:
           ls -la
           cat SHA256SUMS.txt
 
+      # Бандл собирается из исходников и секретов содержать не должен, но
+      # ошибка в define или новый импорт это изменят — проверяем явно.
+      - name: Verify assets carry no secrets
+        run: |
+          if grep -rEq 'sk-[A-Za-z0-9_-]{20,}|[0-9]{8,10}:AA[A-Za-z0-9_-]{32,}' release/; then
+            echo 'В релизных артефактах найден секрет — публикация отменена' >&2
+            exit 1
+          fi
+          echo 'Секретов в артефактах нет'
+
+      # Встроенный gh вместо стороннего action: у джобы contents: write,
+      # и лишняя зависимость здесь — ненужный риск supply chain.
       - name: Publish release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: release/*
-          generate_release_notes: true
-          body: |
-            ## Установка
-
-            ### Вариант 1: из исходников
-
-            ```bash
-            git clone https://github.com/iudanet/tg-llm-worker
-            cd tg-llm-worker
-            git checkout ${{ steps.meta.outputs.tag }}
-            npm ci
-            cp wrangler.toml.example wrangler.toml   # подставить свои значения
-            npx wrangler deploy
-            ```
-
-            ### Вариант 2: архивом
-
-            `tg-llm-worker-${{ steps.meta.outputs.tag }}.tar.gz` — собранный
-            воркер вместе с шаблоном конфига и документацией.
-
-            ### Вариант 3: одним файлом в дашборд
-
-            `tg-llm-worker-${{ steps.meta.outputs.tag }}.js` — тот же бандл
-            отдельным файлом: открыть и вставить в редактор воркера в дашборде
-            Cloudflare, без распаковки.
-
-            В обоих случаях после загрузки нужно задать привязки, иначе
-            воркер не запустится:
-
-            - KV namespace `DATABASE`;
-            - переменные из `wrangler.toml.example` (секция `[vars]`);
-            - секреты `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`,
-              `OPENAI_API_KEY`.
-
-            Затем открыть `https://<worker>.workers.dev/init?token=<секрет>`,
-            чтобы привязать webhook и опубликовать меню команд.
-
-            Контрольные суммы — в `SHA256SUMS.txt`.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.meta.outputs.tag }}" release/* \
+            --title "${{ steps.meta.outputs.tag }}" \
+            --generate-notes \
+            --notes-file .github/release-notes.md

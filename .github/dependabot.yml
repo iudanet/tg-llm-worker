@@ -1,0 +1,18 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    # Патчи мелких зависимостей сливаются пачкой, мажорные — по одной.
+    groups:
+      dev-dependencies:
+        patterns: ['*']
+        update-types: ['minor', 'patch']
+
+  # Actions запинены по SHA — Dependabot будет их обновлять вместе
+  # с комментарием версии, иначе пины устареют молча.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
