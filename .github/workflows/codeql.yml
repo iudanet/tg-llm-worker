@@ -27,10 +27,10 @@ jobs:
       # и не зависит от версии TypeScript в package.json — в отличие от
       # typescript-eslint, который на TS 7 поставить не удалось.
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
           languages: javascript-typescript
           queries: security-extended
 
       - name: Analyze
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
