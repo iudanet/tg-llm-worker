@@ -16,6 +16,7 @@ function config(): Config {
     return {
         botToken: 't', webhookSecret: 's', apiKey: 'k',
         apiBase: 'https://example.invalid/v1', model: 'm', systemPrompt: null,
+        reasoningEffort: null, generationTimeoutMs: 18000,
         whiteList: parseWhiteList(String(USER_ID)), historyMaxMessages: 20,
         historyTtlSeconds: 60, streamIntervalMs: 1000,
         documentThreshold: 4096, useRichMessages: true,

@@ -4,6 +4,8 @@ interface OpenAIOptions {
     apiKey: string;
     apiBase: string;
     model: string;
+    /** Глубина рассуждения reasoning-моделей; null — параметр не передаётся. */
+    reasoningEffort?: string | null;
 }
 
 /**
@@ -32,6 +34,11 @@ export class OpenAIProvider implements ChatProvider {
                 model: this.options.model,
                 messages: messages.map(toWireMessage),
                 stream: true,
+                // Параметр понимают только reasoning-модели, поэтому при
+                // null не отправляем ключ вовсе.
+                ...(this.options.reasoningEffort
+                    ? { reasoning_effort: this.options.reasoningEffort }
+                    : {}),
             }),
             signal,
         });
