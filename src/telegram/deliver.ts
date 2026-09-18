@@ -5,6 +5,14 @@ import { splitMessage, TELEGRAM_MESSAGE_LIMIT } from './split';
 export interface DeliverOptions {
     chatId: number;
     threadId?: number;
+    /**
+     * Сообщение, на которое отвечаем.
+     *
+     * В личных чатах Telegram не всегда кладёт ответ в тред по одному
+     * message_thread_id: ответ оседает в общем потоке. Привязка к исходному
+     * сообщению задаёт тред через цепочку ответов — её клиент понимает.
+     */
+    replyToMessageId?: number;
     /** Ответы длиннее порога уходят файлом .md, а не серией сообщений. */
     documentThreshold: number;
     useRichMessages: boolean;
@@ -36,6 +44,7 @@ export async function deliverAnswer(
         const response = await api.sendRichMessage({
             chat_id: options.chatId,
             message_thread_id: options.threadId,
+            ...replyParameters(options),
             rich_message: { blocks: markdownToRichBlocks(text) },
         });
         if (response.ok) {
@@ -60,6 +69,7 @@ async function sendAsDocument(
     const response = await api.sendDocument({
         chat_id: options.chatId,
         message_thread_id: options.threadId,
+        ...replyParameters(options),
         filename: 'answer.md',
         content: text,
         caption: preview,
@@ -74,33 +84,103 @@ async function sendAsDocument(
     return true;
 }
 
+/** Предел подписи к вложению в Bot API. */
+export const CAPTION_LIMIT = 1024;
+
+const ATTACHMENT_NOTE = '\n\n[…полный ответ во вложении]';
+
 /**
  * buildPreview takes the opening of an answer to caption the attached file.
+ *
+ * Результат гарантированно укладывается в CAPTION_LIMIT вместе с пометкой о
+ * вложении: подпись длиннее лимита Telegram отвергает целиком, и тогда
+ * пользователь не получает ни файла, ни текста.
  */
-export function buildPreview(text: string, limit = 900): string {
+export function buildPreview(text: string, limit = CAPTION_LIMIT - ATTACHMENT_NOTE.length): string {
+    const budget = Math.min(limit, CAPTION_LIMIT - ATTACHMENT_NOTE.length);
     const normalized = text.trim();
-    if (normalized.length <= limit) {
+    if (normalized.length <= budget) {
         return normalized;
     }
-    const window = normalized.slice(0, limit);
+    const window = normalized.slice(0, budget);
     const boundary = Math.max(window.lastIndexOf('\n\n'), window.lastIndexOf('. '));
-    const cut = boundary > limit * 0.5 ? boundary : window.length;
-    return `${normalized.slice(0, cut).trimEnd()}\n\n[…полный ответ во вложении]`;
+    const cut = boundary > budget * 0.5 ? boundary : window.length;
+    return `${normalized.slice(0, cut).trimEnd()}${ATTACHMENT_NOTE}`;
 }
 
+/**
+ * sendPlainChunks is the last delivery route, so it must never fail silently.
+ *
+ * Отказ на одном куске не означает отказ на остальных: дробим дальше, иначе
+ * хвост длинного ответа пропадает без следа. Если не дошёл ни один кусок,
+ * сообщаем об этом пользователю — иначе он видит только исчезнувший черновик.
+ */
 async function sendPlainChunks(
     api: TelegramApi,
     text: string,
     options: DeliverOptions,
 ): Promise<void> {
-    for (const chunk of splitMessage(text, TELEGRAM_MESSAGE_LIMIT)) {
+    const chunks = splitMessage(text, TELEGRAM_MESSAGE_LIMIT);
+    let delivered = 0;
+
+    for (const chunk of chunks) {
         const response = await api.sendMessage({
             chat_id: options.chatId,
             message_thread_id: options.threadId,
+            // Привязываем только первый кусок: дальше тред уже задан, а
+            // цитата у каждого сообщения серии выглядит шумно.
+            ...(delivered === 0 ? replyParameters(options) : {}),
             text: chunk,
         });
-        if (!response.ok) {
-            break;
+        if (response.ok) {
+            delivered += 1;
+            continue;
         }
+        console.error(JSON.stringify({
+            msg: 'chunk delivery failed',
+            chat_id: options.chatId,
+            chunk_length: chunk.length,
+            error_code: response.error_code,
+            description: response.description,
+        }));
+    }
+
+    if (delivered === 0 && chunks.length > 0) {
+        await notifyDeliveryFailure(api, options);
+    }
+}
+
+/**
+ * replyParameters binds the answer to the question that triggered it.
+ *
+ * allow_sending_without_reply обязателен: пользователь может удалить свой
+ * вопрос, и без флага Telegram отклонит весь ответ.
+ */
+function replyParameters(options: DeliverOptions) {
+    return options.replyToMessageId === undefined
+        ? {}
+        : {
+            reply_parameters: {
+                message_id: options.replyToMessageId,
+                allow_sending_without_reply: true,
+            },
+        };
+}
+
+/**
+ * notifyDeliveryFailure tells the user the answer exists but could not be sent.
+ */
+async function notifyDeliveryFailure(api: TelegramApi, options: DeliverOptions): Promise<void> {
+    const response = await api.sendMessage({
+        chat_id: options.chatId,
+        message_thread_id: options.threadId,
+        text: 'Ответ сформирован, но Telegram отклонил его отправку. Попробуйте переспросить.',
+    });
+    if (!response.ok) {
+        console.error(JSON.stringify({
+            msg: 'delivery failure notice rejected',
+            chat_id: options.chatId,
+            description: response.description,
+        }));
     }
 }

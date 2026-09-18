@@ -11,6 +11,8 @@ export interface Env {
     OPENAI_API_BASE?: string;
 
     CHAT_MODEL?: string;
+    REASONING_EFFORT?: string;
+    GENERATION_TIMEOUT_MS?: string;
     SYSTEM_PROMPT?: string;
     CHAT_WHITE_LIST?: string;
     HISTORY_MAX_MESSAGES?: string;
@@ -40,6 +42,10 @@ export interface Config {
     apiKey: string;
     apiBase: string;
     model: string;
+    /** Глубина рассуждения reasoning-моделей; null — не передавать параметр. */
+    reasoningEffort: string | null;
+    /** Потолок генерации, мс: дальше обрываем и отдаём накопленное. */
+    generationTimeoutMs: number;
     systemPrompt: string | null;
     whiteList: Set<number>;
     historyMaxMessages: number;
@@ -62,6 +68,15 @@ export interface Config {
 }
 
 const DEFAULT_MODEL = 'gpt-5-mini';
+// gpt-5 тратит скрытые токены на размышление до первого видимого токена,
+// и на длинном ответе это съедает весь бюджет waitUntil. low сокращает
+// эту фазу в разы, почти не теряя качества на прикладных вопросах.
+const DEFAULT_REASONING_EFFORT = 'low';
+// waitUntil живёт 30 с. Вычитаем окно сбора серии (8 с) и оставляем
+// несколько секунд на доставку ответа в Telegram.
+const DEFAULT_GENERATION_TIMEOUT_MS = 18000;
+/** Значения reasoning_effort, которые принимает OpenAI. */
+const REASONING_EFFORTS = new Set(['minimal', 'low', 'medium', 'high']);
 const DEFAULT_API_BASE = 'https://api.openai.com/v1';
 const DEFAULT_HISTORY_MAX_MESSAGES = 20;
 const DEFAULT_HISTORY_TTL_SECONDS = 60 * 60 * 24 * 7;
@@ -86,6 +101,28 @@ const DEFAULT_TRANSCRIBE_MODEL = 'gpt-4o-mini-transcribe';
 // Предел эндпоинта транскрипции — 25 МБ; getFile отдаёт максимум 20 МБ,
 // поэтому реальным ограничением остаётся Bot API.
 const DEFAULT_AUDIO_MAX_BYTES = 20 * 1024 * 1024;
+
+/**
+ * parseReasoningEffort validates the configured effort level.
+ *
+ * Пустая строка или 'off' означают «не передавать параметр вовсе»: он есть
+ * только у reasoning-моделей, и обычные модели на него отвечают ошибкой.
+ */
+function parseReasoningEffort(value: string | undefined): string | null {
+    if (value === undefined) {
+        return DEFAULT_REASONING_EFFORT;
+    }
+    const normalized = value.trim().toLowerCase();
+    if (normalized === '' || normalized === 'off') {
+        return null;
+    }
+    if (!REASONING_EFFORTS.has(normalized)) {
+        throw new Error(
+            `REASONING_EFFORT must be one of ${[...REASONING_EFFORTS].join(', ')} or off`,
+        );
+    }
+    return normalized;
+}
 
 function parseIntOr(value: string | undefined, fallback: number): number {
     if (!value) {
@@ -151,6 +188,11 @@ export function loadConfig(env: Env): Config {
             (env.OPENAI_API_BASE || DEFAULT_API_BASE).replace(/\/+$/, ''),
         ),
         model: env.CHAT_MODEL || DEFAULT_MODEL,
+        reasoningEffort: parseReasoningEffort(env.REASONING_EFFORT),
+        generationTimeoutMs: parseIntOr(
+            env.GENERATION_TIMEOUT_MS,
+            DEFAULT_GENERATION_TIMEOUT_MS,
+        ),
         systemPrompt: env.SYSTEM_PROMPT || null,
         whiteList: parseWhiteList(env.CHAT_WHITE_LIST),
         historyMaxMessages: parseIntOr(env.HISTORY_MAX_MESSAGES, DEFAULT_HISTORY_MAX_MESSAGES),

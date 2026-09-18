@@ -99,6 +99,7 @@ async function handleWebhook(
             apiKey: config.apiKey,
             apiBase: config.apiBase,
             model: config.model,
+            reasoningEffort: config.reasoningEffort,
         }),
         history: new KVHistoryStore(env.DATABASE, config.historyMaxMessages, config.historyTtlSeconds),
         // Картинки живут в том же namespace, но своими ключами и с меньшим TTL.

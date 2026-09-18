@@ -609,33 +609,68 @@ async function runTurn(
     });
     await streamer.start();
 
+    // Копим ответ здесь, а не внутри провайдера: при обрыве по таймауту
+    // исключение уносит всё, что накопилось у него внутри, а этот текст
+    // остаётся — и его ещё можно доставить.
+    let partial = '';
+    const controller = new AbortController();
+    // waitUntil убивает воркер примерно на 30-й секунде, и тогда пропадает
+    // и ответ, и история: черновик эфемерный, он просто протухает. Рвём
+    // генерацию заранее, чтобы успеть отправить хотя бы часть.
+    const timer = setTimeout(() => controller.abort(), deps.config.generationTimeoutMs);
+
     let answer: string;
+    let truncated = false;
     try {
         answer = await deps.provider.stream(conversation, {
-            onDelta: accumulated => streamer.update(accumulated),
-        });
+            onDelta: accumulated => {
+                partial = accumulated;
+                return streamer.update(accumulated);
+            },
+        }, controller.signal);
     } catch (error) {
-        console.error(JSON.stringify({
-            msg: 'llm request failed',
-            chat_id: chatId,
-            error: error instanceof Error ? error.message : String(error),
-        }));
-        await deps.api.sendMessage({
-            chat_id: chatId,
-            message_thread_id: message.message_thread_id,
-            text: 'Не удалось получить ответ от модели. Попробуйте ещё раз.',
-        });
-        return;
+        if (controller.signal.aborted && partial.trim() !== '') {
+            // Успели получить часть ответа — она полезнее, чем ничего.
+            console.error(JSON.stringify({
+                msg: 'generation timed out, delivering partial answer',
+                chat_id: chatId,
+                length: partial.length,
+                timeout_ms: deps.config.generationTimeoutMs,
+            }));
+            answer = `${partial}\n\n[…ответ обрезан по таймауту, попросите продолжить]`;
+            truncated = true;
+        } else {
+            console.error(JSON.stringify({
+                msg: 'llm request failed',
+                chat_id: chatId,
+                aborted: controller.signal.aborted,
+                error: error instanceof Error ? error.message : String(error),
+            }));
+            await deps.api.sendMessage({
+                chat_id: chatId,
+                message_thread_id: message.message_thread_id,
+                text: controller.signal.aborted
+                    ? 'Модель не успела ответить за отведённое время. Попробуйте переспросить короче.'
+                    : 'Не удалось получить ответ от модели. Попробуйте ещё раз.',
+            });
+            return;
+        }
+    } finally {
+        clearTimeout(timer);
     }
 
     await deliverAnswer(deps.api, answer, {
         chatId,
         threadId: message.message_thread_id,
+        replyToMessageId: message.message_id,
         documentThreshold: deps.config.documentThreshold,
         useRichMessages: deps.config.useRichMessages,
     });
 
-    await deps.history.save(key, [...stored, { role: 'assistant', content: answer }]);
+    // В историю кладём текст без служебной пометки: она адресована человеку,
+    // а модели в следующем запросе только мешает.
+    const forHistory = truncated ? partial : answer;
+    await deps.history.save(key, [...stored, { role: 'assistant', content: forHistory }]);
 }
 
 /**

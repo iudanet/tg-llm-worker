@@ -156,6 +156,10 @@ export class TelegramApi {
         if (params.caption) {
             form.append('caption', params.caption);
         }
+        if (params.reply_parameters) {
+            // multipart передаёт вложенные структуры только строкой JSON.
+            form.append('reply_parameters', JSON.stringify(params.reply_parameters));
+        }
         form.append('document', new Blob([params.content], { type: 'text/markdown' }), params.filename);
 
         const response = await fetch(`${API_ROOT}/bot${this.token}/sendDocument`, {

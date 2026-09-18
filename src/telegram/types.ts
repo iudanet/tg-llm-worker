@@ -133,6 +133,10 @@ export interface SendDocumentParams {
     filename: string;
     content: string;
     caption?: string;
+    reply_parameters?: {
+        message_id: number;
+        allow_sending_without_reply?: boolean;
+    };
 }
 
 export interface SendRichMessageParams {
