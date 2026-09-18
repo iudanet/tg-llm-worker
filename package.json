@@ -14,9 +14,6 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "bridge": "node scripts/local-bridge.mjs",
-    "fire": "./scripts/fire.sh",
-    "probe": "node scripts/probe-topics.mjs",
     "lint": "oxlint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
@@ -30,6 +27,6 @@
     "oxlint": "^1.82.0",
     "typescript": "^7.0.2",
     "vitest": "^5.0.0",
-    "wrangler": "^4.129.0"
+    "wrangler": "^4.135.0"
   }
 }
