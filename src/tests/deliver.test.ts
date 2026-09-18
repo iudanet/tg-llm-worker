@@ -66,13 +66,56 @@ describe('deliverAnswer', () => {
         expect(api.sendMessage.mock.calls.length).toBeGreaterThanOrEqual(3);
     });
 
+    it('stops the series when Telegram blocks the bot', async () => {
+        // 403 не пройдёт и для остальных кусков: продолжать — значит впустую
+        // потратить бюджет waitUntil, из-за чего не успеет сохраниться история.
+        const api = stubApi({
+            sendMessage: vi.fn(async () => ({ ok: false, error_code: 403, description: 'Forbidden: bot was blocked by the user' })),
+        });
+
+        await deliverAnswer(asApi(api), 'b'.repeat(9000), { ...BASE, documentThreshold: 100_000 });
+
+        expect(api.sendMessage).toHaveBeenCalledOnce();
+    });
+
+    it('stops the series when Telegram rate-limits the bot', async () => {
+        // Продолжение серии на 429 только усугубляет ограничение.
+        const api = stubApi({
+            sendMessage: vi.fn(async () => ({ ok: false, error_code: 429, description: 'Too Many Requests: retry after 30' })),
+        });
+
+        await deliverAnswer(asApi(api), 'b'.repeat(9000), { ...BASE, documentThreshold: 100_000 });
+
+        expect(api.sendMessage).toHaveBeenCalledOnce();
+    });
+
+    it('still tries the remaining chunks after a one-off rejection', async () => {
+        // Отказ по конкретному куску (400) не означает, что не пройдут другие.
+        let call = 0;
+        const api = stubApi({
+            sendMessage: vi.fn(async () => {
+                call += 1;
+                return call === 1
+                    ? { ok: false, error_code: 400, description: 'Bad Request: message text is empty' }
+                    : OK;
+            }),
+        });
+
+        await deliverAnswer(asApi(api), 'b'.repeat(9000), { ...BASE, documentThreshold: 100_000 });
+
+        expect(api.sendMessage.mock.calls.length).toBeGreaterThanOrEqual(3);
+    });
+
     it('reports a failure to the user when every chunk is rejected', async () => {
         // Иначе пользователь видит только исчезнувший черновик и тишину.
-        const api = stubApi({ sendMessage: vi.fn(async () => failure('Forbidden: bot was blocked')) });
+        // 400 — разовый отказ: канал жив, значит о провале можно сообщить.
+        const api = stubApi({ sendMessage: vi.fn(async () => failure('Bad Request: message is too long')) });
 
         await deliverAnswer(asApi(api), 'short answer', BASE);
 
-        expect(api.sendMessage).toHaveBeenCalled();
+        expect(api.sendMessage.mock.calls.length).toBe(2);
+        const [notice] = api.sendMessage.mock.calls[1] as [{ text: string }];
+        expect(notice.text).toContain('отклонил его отправку');
     });
 
     it('falls back to chunks when a rich message is rejected', async () => {

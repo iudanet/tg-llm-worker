@@ -18,6 +18,10 @@ export async function handleUpdate(update: TelegramUpdate, deps: HandlerDeps): P
     if (!message?.from) {
         return;
     }
+    if (!hasSaneIds(message)) {
+        console.error(JSON.stringify({ msg: 'update with malformed identifiers' }));
+        return;
+    }
     if (!isAllowed(message, deps.config)) {
         console.error(JSON.stringify({
             msg: 'rejected by whitelist',
@@ -55,6 +59,25 @@ export async function handleUpdate(update: TelegramUpdate, deps: HandlerDeps): P
         return;
     }
     await handleChat(text, message, deps);
+}
+
+/**
+ * hasSaneIds rejects an update whose identifiers are not plain integers.
+ *
+ * Тело вебхука приводится к TelegramUpdate без проверки: типы существуют
+ * только на этапе компиляции. Идентификаторы идут в ключи KV, и строка
+ * вида "42:77" вместо числа дала бы ключ чужого топика. Граница доверия —
+ * секрет вебхука, но одной проверки типов она стоить не должна.
+ */
+function hasSaneIds(message: TelegramMessage): boolean {
+    const ids = [
+        message.chat?.id,
+        message.from?.id,
+        message.message_id,
+        // Топик необязателен: вне топиков Telegram его не присылает.
+        ...(message.message_thread_id === undefined ? [] : [message.message_thread_id]),
+    ];
+    return ids.every(id => typeof id === 'number' && Number.isSafeInteger(id));
 }
 
 /**
