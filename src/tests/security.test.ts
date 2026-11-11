@@ -70,3 +70,15 @@ describe('escapeHtml', () => {
         expect(escapeHtml('gpt-5-mini')).toBe('gpt-5-mini');
     });
 });
+
+describe('loadConfig reasoning effort', () => {
+    it('passes none through so GPT-6 models skip reasoning explicitly', () => {
+        // У GPT-6 рассуждение по умолчанию medium: не отправить параметр
+        // значит включить его. Отключить можно только явным none.
+        expect(loadConfig(env({ REASONING_EFFORT: 'none' })).reasoningEffort).toBe('none');
+    });
+
+    it('treats off as "do not send the parameter"', () => {
+        expect(loadConfig(env({ REASONING_EFFORT: 'off' })).reasoningEffort).toBeNull();
+    });
+});
