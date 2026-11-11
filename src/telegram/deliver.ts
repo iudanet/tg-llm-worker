@@ -109,11 +109,22 @@ export function buildPreview(text: string, limit = CAPTION_LIMIT - ATTACHMENT_NO
 }
 
 /**
+ * FATAL_DELIVERY_CODES mark failures that will repeat for every chunk.
+ *
+ * 403 — бот заблокирован или выкинут из чата, 429 — лимит частоты. В обоих
+ * случаях остальные куски тоже не пройдут, а попытки съедают бюджет
+ * waitUntil, после которого не успеет сохраниться история.
+ */
+const FATAL_DELIVERY_CODES = new Set([403, 429]);
+
+/**
  * sendPlainChunks is the last delivery route, so it must never fail silently.
  *
- * Отказ на одном куске не означает отказ на остальных: дробим дальше, иначе
- * хвост длинного ответа пропадает без следа. Если не дошёл ни один кусок,
- * сообщаем об этом пользователю — иначе он видит только исчезнувший черновик.
+ * Разовый отказ (например, на пустом куске) не означает отказ на остальных —
+ * продолжаем, иначе хвост длинного ответа пропадает без следа. А отказ,
+ * который повторится для всей серии, прерывает её сразу. Если не дошёл ни
+ * один кусок, говорим об этом: иначе пользователь видит только исчезнувший
+ * черновик и тишину.
  */
 async function sendPlainChunks(
     api: TelegramApi,
@@ -122,6 +133,7 @@ async function sendPlainChunks(
 ): Promise<void> {
     const chunks = splitMessage(text, TELEGRAM_MESSAGE_LIMIT);
     let delivered = 0;
+    let fatal = false;
 
     for (const chunk of chunks) {
         const response = await api.sendMessage({
@@ -143,9 +155,15 @@ async function sendPlainChunks(
             error_code: response.error_code,
             description: response.description,
         }));
+
+        if (response.error_code !== undefined && FATAL_DELIVERY_CODES.has(response.error_code)) {
+            fatal = true;
+            break;
+        }
     }
 
-    if (delivered === 0 && chunks.length > 0) {
+    // При фатальном отказе уведомление не дойдёт тем же путём — не пытаемся.
+    if (delivered === 0 && chunks.length > 0 && !fatal) {
         await notifyDeliveryFailure(api, options);
     }
 }
