@@ -255,43 +255,43 @@ describe('topic naming', () => {
     });
 });
 
-describe('bursts of messages', () => {
-    /**
-     * Пересылка и комментарий приходят двумя апдейтами. Оба обрабатываются
-     * общим буфером, поэтому здесь они прогоняются через один FakeBatches —
-     * так же, как это происходит в одном изоляте воркера.
-     */
-    async function burst(texts: string[], startId = 10) {
-        const batches = new FakeBatches();
-        const { api, sent, renamed } = fakeApi();
-        const { provider, seen } = fakeProvider();
-        const history = new FakeHistory([]);
-        const images = new FakeImages();
+/**
+ * Пересылка и комментарий приходят двумя апдейтами. Оба обрабатываются
+ * общим буфером, поэтому здесь они прогоняются через один FakeBatches —
+ * так же, как это происходит в одном изоляте воркера.
+ */
+async function burst(texts: string[], startId = 10) {
+    const batches = new FakeBatches();
+    const { api, sent, renamed } = fakeApi();
+    const { provider, seen } = fakeProvider();
+    const history = new FakeHistory([]);
+    const images = new FakeImages();
 
-        // Все апдейты кладутся в буфер до того, как истечёт окно первого:
-        // именно так выглядит быстрая серия сообщений.
-        const deps = {
-            api,
-            provider,
-            history,
-            images: images as unknown as ImageStore,
-            batches: batches as unknown as BatchBufferLike,
-            config: config({ batchWindowMs: 1500 }),
-            sleep: async () => {},
-        };
+    // Все апдейты кладутся в буфер до того, как истечёт окно первого:
+    // именно так выглядит быстрая серия сообщений.
+    const deps = {
+        api,
+        provider,
+        history,
+        images: images as unknown as ImageStore,
+        batches: batches as unknown as BatchBufferLike,
+        config: config({ batchWindowMs: 1500 }),
+        sleep: async () => {},
+    };
 
-        for (const [index, text] of texts.entries()) {
-            await batches.append(
-                { chatId: USER_ID, threadId: THREAD_ID },
-                { id: startId + index, content: text },
-            );
-        }
-        for (const [index, text] of texts.entries()) {
-            await handleUpdate(textUpdateWithId(text, startId + index), deps);
-        }
-        return { sent, seen, renamed, history, batches };
+    for (const [index, text] of texts.entries()) {
+        await batches.append(
+            { chatId: USER_ID, threadId: THREAD_ID },
+            { id: startId + index, content: text },
+        );
     }
+    for (const [index, text] of texts.entries()) {
+        await handleUpdate(textUpdateWithId(text, startId + index), deps);
+    }
+    return { sent, seen, renamed, history, batches };
+}
 
+describe('bursts of messages', () => {
     it('answers once for a forward and its comment', async () => {
         const { seen } = await burst(['пересланный текст', 'что думаешь?']);
         expect(seen).toHaveLength(1);
@@ -324,61 +324,61 @@ describe('bursts of messages', () => {
     });
 });
 
-describe('slow bursts', () => {
-    /**
-     * Серия, растянутая дольше окна: сообщения приходят не одновременно.
-     * Фиксированное окно здесь развалилось бы — окно первого сообщения
-     * истекало бы раньше, чем доставлен последний, и ответов было бы несколько.
-     *
-     * Каждый апдейт обрабатывается своим handleUpdate, как в воркере; часы
-     * и сон подменены, поэтому тест не спит по-настоящему.
-     */
-    async function slowBurst(count: number, options: { maxWaitMs?: number } = {}) {
-        const WINDOW = 1500;
-        const START = 100_000;
+/**
+ * Серия, растянутая дольше окна: сообщения приходят не одновременно.
+ * Фиксированное окно здесь развалилось бы — окно первого сообщения
+ * истекало бы раньше, чем доставлен последний, и ответов было бы несколько.
+ *
+ * Каждый апдейт обрабатывается своим handleUpdate, как в воркере; часы
+ * и сон подменены, поэтому тест не спит по-настоящему.
+ */
+async function slowBurst(count: number, options: { maxWaitMs?: number } = {}) {
+    const WINDOW = 1500;
+    const START = 100_000;
 
-        const batches = new FakeBatches();
-        const { api, sent } = fakeApi();
-        const { provider, seen } = fakeProvider();
-        const history = new FakeHistory([]);
-        const images = new FakeImages();
-        const scope = { chatId: USER_ID, threadId: THREAD_ID };
+    const batches = new FakeBatches();
+    const { api, sent } = fakeApi();
+    const { provider, seen } = fakeProvider();
+    const history = new FakeHistory([]);
+    const images = new FakeImages();
+    const scope = { chatId: USER_ID, threadId: THREAD_ID };
 
-        let clock = START;
-        const deps = {
-            api,
-            provider,
-            history,
-            images: images as unknown as ImageStore,
-            batches: batches as unknown as BatchBufferLike,
-            config: config({
-                batchWindowMs: WINDOW,
-                batchMaxWaitMs: options.maxWaitMs ?? 8000,
-            }),
-            // Сон только двигает часы: доставку эмулирует цикл ниже.
-            sleep: async (ms: number) => {
-                clock += ms;
-            },
-            now: () => clock,
-        };
+    let clock = START;
+    const deps = {
+        api,
+        provider,
+        history,
+        images: images as unknown as ImageStore,
+        batches: batches as unknown as BatchBufferLike,
+        config: config({
+            batchWindowMs: WINDOW,
+            batchMaxWaitMs: options.maxWaitMs ?? 8000,
+        }),
+        // Сон только двигает часы: доставку эмулирует цикл ниже.
+        sleep: async (ms: number) => {
+            clock += ms;
+        },
+        now: () => clock,
+    };
 
-        // Сообщения приходят по одному с паузой меньше окна, поэтому окно
-        // каждый раз продлевается.
-        const running: Array<Promise<void>> = [];
-        for (let index = 0; index < count; index += 1) {
-            const id = 10 + index;
-            const text = `сообщение ${index + 1}`;
-            clock += Math.floor(WINDOW / 2);
-            await batches.append(scope, { id, content: text }, clock);
-            running.push(handleUpdate(textUpdateWithId(text, id), deps));
-            // Даём обработчику дойти до своего первого сна.
-            await Promise.resolve();
-        }
-        await Promise.all(running);
-
-        return { sent, seen, history, batches, elapsed: () => clock - START };
+    // Сообщения приходят по одному с паузой меньше окна, поэтому окно
+    // каждый раз продлевается.
+    const running: Array<Promise<void>> = [];
+    for (let index = 0; index < count; index += 1) {
+        const id = 10 + index;
+        const text = `сообщение ${index + 1}`;
+        clock += Math.floor(WINDOW / 2);
+        await batches.append(scope, { id, content: text }, clock);
+        running.push(handleUpdate(textUpdateWithId(text, id), deps));
+        // Даём обработчику дойти до своего первого сна.
+        await Promise.resolve();
     }
+    await Promise.all(running);
 
+    return { sent, seen, history, batches, elapsed: () => clock - START };
+}
+
+describe('slow bursts', () => {
     it('answers once for a burst stretched beyond the window', async () => {
         const { seen } = await slowBurst(5);
         expect(seen).toHaveLength(1);
