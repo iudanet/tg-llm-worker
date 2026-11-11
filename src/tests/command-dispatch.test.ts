@@ -125,41 +125,41 @@ async function run(text: string, threadId?: number) {
     return { sent, deleted, history, modelCalls: calls.n };
 }
 
+/** Собирает апдейт с подменённым полем, минуя типы TypeScript. */
+async function runRaw(patch: Record<string, unknown>) {
+    const sent: SendMessageParams[] = [];
+    const api = {
+        async sendMessage(params: SendMessageParams) {
+            sent.push(params);
+            return { ok: true };
+        },
+        async sendMessageDraft() {
+            return { ok: true, result: true };
+        },
+        async editForumTopic() {
+            return { ok: true, result: true };
+        },
+    } as unknown as TelegramApi;
+
+    const { provider, calls } = forbiddenProvider();
+    const base = commandUpdate('привет');
+    const update = {
+        ...base,
+        message: { ...base.message, ...patch },
+    } as unknown as TelegramUpdate;
+
+    await handleUpdate(update, {
+        api,
+        provider,
+        history: new FakeHistory(),
+        images: {} as never,
+        batches: new FakeBatches() as never,
+        config: config(),
+    } as never);
+    return { sent, modelCalls: calls.n };
+}
+
 describe('identifier validation', () => {
-    /** Собирает апдейт с подменённым полем, минуя типы TypeScript. */
-    async function runRaw(patch: Record<string, unknown>) {
-        const sent: SendMessageParams[] = [];
-        const api = {
-            async sendMessage(params: SendMessageParams) {
-                sent.push(params);
-                return { ok: true };
-            },
-            async sendMessageDraft() {
-                return { ok: true, result: true };
-            },
-            async editForumTopic() {
-                return { ok: true, result: true };
-            },
-        } as unknown as TelegramApi;
-
-        const { provider, calls } = forbiddenProvider();
-        const base = commandUpdate('привет');
-        const update = {
-            ...base,
-            message: { ...base.message, ...patch },
-        } as unknown as TelegramUpdate;
-
-        await handleUpdate(update, {
-            api,
-            provider,
-            history: new FakeHistory(),
-            images: {} as never,
-            batches: new FakeBatches() as never,
-            config: config(),
-        } as never);
-        return { sent, modelCalls: calls.n };
-    }
-
     it('drops an update whose chat id is a string', async () => {
         // "42:77" в ключе дало бы chat:42:77 — топик 77 чужого разговора.
         const { sent, modelCalls } = await runRaw({ chat: { id: '42:77', type: 'private' } });
