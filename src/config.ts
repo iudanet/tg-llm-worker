@@ -76,7 +76,8 @@ const DEFAULT_REASONING_EFFORT = 'low';
 // несколько секунд на доставку ответа в Telegram.
 const DEFAULT_GENERATION_TIMEOUT_MS = 18000;
 /** Значения reasoning_effort, которые принимает OpenAI. */
-const REASONING_EFFORTS = new Set(['minimal', 'low', 'medium', 'high']);
+// none — явный отказ от рассуждения (GPT-6), в отличие от off, который не шлёт параметр.
+const REASONING_EFFORTS = new Set(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
 const DEFAULT_API_BASE = 'https://api.openai.com/v1';
 const DEFAULT_HISTORY_MAX_MESSAGES = 20;
 const DEFAULT_HISTORY_TTL_SECONDS = 60 * 60 * 24 * 7;
